@@ -66,7 +66,7 @@ export async function requireUser(min: Role = "agent"): Promise<SessionUser> {
   const user = await getUser();
   if (!user) redirect("/no-access");
   if (user.role === "dealership") redirect("/no-access");
-  if (RANK[user.role] < RANK[min]) redirect("/service/guidelines");
+  if (RANK[user.role] < RANK[min]) redirect("/service/info");
   return user;
 }
 

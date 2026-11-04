@@ -18,25 +18,9 @@ const RAW: Record<string, string> = {
   V: "Válvula|Valve;Varilla|Push rod;Velocímetro|Speedometer;Ventana|Window;Ventanilla|Door window;Ventilación|Air vent;Ventilador|Fan;Volante|Steering wheel",
   Z: "Zapatas de freno|Brake shoes",
 };
-const video = (name: string, token: string) => `https://firebasestorage.googleapis.com/v0/b/bdctool-e9dc3.appspot.com/o/videos%2F${name}.m4v?alt=media&token=${token}`;
-const VIDEOS: Record<string, [string, string][]> = {
-  "Elder Ford": [["MY KARMA - ELDER FORD", video("karma", "ef224792-e6e3-4d24-8478-ddc7ca43ab60")]],
-  "Largo Honda": [["Using the system and selecting a service advisor", video("largo1", "613102d2-0384-40c4-ae7f-106aa55b5aad")], ["The reason why we always must select a service advisor", video("largo2", "f61d77b0-ef3b-49c5-b215-740cebf50a4b")]],
-  "Jim Cogdill": [["How to use the tool and made an appointment", video("cogdill1", "ca69907e-ad49-4c15-9d88-fb66003d4cf9")], ["How to communicate with service advisors and other departments", video("cogdill2", "62896a96-57ed-4aab-9ec4-7f3eb6dc0665")]],
-  "Kia of Frisco": [["How to use the tool", video("frisco1", "33a6f548-dce8-45a0-99e2-aa0b02d6b70d")], ["How to modify any appointment", video("frisco2", "830cd0c3-ac21-4b09-b739-05d52968df76")]],
-  "Grossman Stores": [["GROSSMAN STORES - Videos", video("grossman", "7f2a4001-164a-4495-a2ab-0ba8add18ddc")]],
-  "Betten Baker": [["BETTEN BAKER STORES", video("betten", "dfb0f338-99d7-4de4-a3cc-3a968a04a939")]],
-};
-
 const terms = (letter: string) => RAW[letter].split(";").map((t) => t.split("|")).map(([es, en]) => `<article class="x-term" data-term><strong>${es}</strong><span>${en}</span></article>`).join("");
-const videos = (list: [string, string][]) => list.map(([title, src]) => `<article class="x-video"><h4>${title}</h4><video controls preload="none" src="${src.replace(/&/g, "&amp;")}"></video></article>`).join("");
 
 // Adds the missing content, closed, right after each section's button.
 export function withExtras(html: string) {
-  let out = html.replace(/(<div id="dictionary-letter-(.)"[^>]*>[\s\S]*?<\/button>)/g, (m, head, letter) => (RAW[letter] ? `${head}<div class="x-term-grid" data-panel hidden>${terms(letter)}</div>` : m));
-  for (const [label, list] of Object.entries(VIDEOS)) {
-    const button = new RegExp(`<button(?:(?!<button)[^>])*aria-expanded="false"[^>]*>(?:(?!</button>)[\\s\\S])*?>${label}<(?:(?!</button>)[\\s\\S])*?</button>`);
-    out = out.replace(button, (m) => `${m}<div class="x-video-list" data-panel hidden>${videos(list)}</div>`);
-  }
-  return out;
+  return html.replace(/(<div id="dictionary-letter-(.)"[^>]*>[\s\S]*?<\/button>)/g, (m, head, letter) => (RAW[letter] ? `${head}<div class="x-term-grid" data-panel hidden>${terms(letter)}</div>` : m));
 }

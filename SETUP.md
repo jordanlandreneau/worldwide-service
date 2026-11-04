@@ -1,5 +1,10 @@
 # Worldwide Service: setup with its own database
 
+Scope: the site has only the **Reference Library** (`/service/glossary`) and **Service Data**
+(`/service/info`, edited in Service Admin at `/service/manage`). Guidelines, Information, Training and
+Resource Center were dropped, and their rows were deleted from this project's `service_pages`.
+The Reference Library uses no files from the `service-files` bucket.
+
 The Service site runs on its own Supabase project, fully separate from Worldwide 4.0. Service content
 and user accounts are copied over from 4.0 once. After that, a change in one place does not show up
 in the other.

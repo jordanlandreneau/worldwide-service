@@ -10,11 +10,7 @@ import type { Role } from "@/lib/access";
 // Service site menu (carried over from Worldwide Service's Service section).
 const GROUPS: { label: string; items: { label: string; href: string; icon: typeof Info; min: Role }[] }[] = [
   { label: "Service", items: [
-    { label: "Guidelines", href: "/service/guidelines", icon: ScrollText, min: "agent" },
-    { label: "Information", href: "/service/information", icon: Info, min: "agent" },
-    { label: "Training", href: "/service/training", icon: GraduationCap, min: "agent" },
     { label: "Reference Library", href: "/service/glossary", icon: Library, min: "agent" },
-    { label: "Resource Center", href: "/service/external-links", icon: Library, min: "agent" },
     { label: "Service Data", href: "/service/info", icon: CircleHelp, min: "agent" },
   ] },
   { label: "Admin", items: [
@@ -23,7 +19,7 @@ const GROUPS: { label: string; items: { label: string; href: string; icon: typeo
 ];
 // Every page has its own color, so it's easy to tell where you are.
 const TONES: Record<string, string> = {
-  "/service/guidelines": "violet", "/service/information": "cyan", "/service/training": "orange", "/service/glossary": "green", "/service/external-links": "pink", "/service/info": "indigo",
+  "/service/info": "indigo", "/service/glossary": "green",
   "/service/manage": "amber",
 };
 const RANK: Record<Role, number> = { dealership: 0, agent: 1, manager: 2, admin: 3 };
@@ -40,7 +36,7 @@ export function Shell({ user, children }: { user: { name: string; role: Role }; 
     <div className="x-app" data-collapsed={collapsed}>
       {open && <button className="x-scrim" aria-label="Close menu" onClick={() => setOpen(false)} />}
       <aside className="x-rail" data-open={open}>
-        <Link href="/service/guidelines" className="x-brand">
+        <Link href="/service/info" className="x-brand">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img alt="Worldwide BDC" width={148} height={24} src="/brand/logo-worldwide.svg" />
         </Link>

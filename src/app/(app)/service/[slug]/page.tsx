@@ -3,7 +3,8 @@ import { ServiceHtml } from "@/components/service-html";
 import { requireUser } from "@/lib/access";
 import { db } from "@/lib/data";
 
-const SLUGS = new Set(["guidelines", "information", "training", "glossary", "external-links"]);
+// Only the Reference Library is kept from the pages captured from 3.0.
+const SLUGS = new Set(["glossary"]);
 
 export default async function ServicePage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Record<string, string>> }) {
   await requireUser();
