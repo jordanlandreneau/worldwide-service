@@ -35,8 +35,8 @@ export function Shell({ user, children }: { user: { name: string; role: Role }; 
   const here = GROUPS.flatMap((g) => g.items).find((i) => matches(i.href));
   const tone = (here && TONES[here.href]) ?? "blue";
   const initials = user.name.split(/[\s.@]+/).slice(0, 2).map((s) => s[0]?.toUpperCase()).join("");
-  // Service Data is laid out like the BMW Service & Scheduling Guide, top bar included.
-  if (path.startsWith("/service/info")) {
+  // The whole site is laid out like the BMW Service & Scheduling Guide: dark top bar, no side rail.
+  {
     const links = GROUPS.flatMap((g) => g.items).filter((i) => RANK[user.role] >= RANK[i.min]);
     return (
       <div className="svc-app">
@@ -54,53 +54,8 @@ export function Shell({ user, children }: { user: { name: string; role: Role }; 
             <form action="/auth/signout" method="post" className="svc-signout"><button title={`Sign out ${user.name}`} aria-label="Sign out"><span aria-hidden>{initials}</span><LogOut size={15} /></button></form>
           </div>
         </header>
-        <main id="main-content" className="svc-main">{children}</main>
+        <main id="main-content" className="svc-main" data-tone={tone}>{children}</main>
       </div>
     );
   }
-  return (
-    <div className="x-app" data-collapsed={collapsed}>
-      {open && <button className="x-scrim" aria-label="Close menu" onClick={() => setOpen(false)} />}
-      <aside className="x-rail" data-open={open}>
-        <Link href="/service/info" className="x-brand">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img alt="Worldwide BDC" width={148} height={24} src="/brand/logo-worldwide.svg" />
-        </Link>
-        <nav aria-label="Primary" className="x-nav">
-          {GROUPS.map((g) => {
-            const items = g.items.filter((i) => RANK[user.role] >= RANK[i.min]);
-            if (!items.length) return null;
-            return (
-              <div key={g.label} className="x-nav-group">
-                {user.role !== "dealership" && <div className="x-nav-label">{g.label}</div>}
-                {items.map((i) => {
-                  const active = matches(i.href);
-                  return (
-                    <Link key={i.href} href={i.href} onClick={() => setOpen(false)} aria-current={active ? "page" : undefined} className="x-nav-item" data-tone={TONES[i.href] ?? "blue"} data-active={active}>
-                      <i.icon size={17} aria-hidden />
-                      <span>{i.label}</span>
-                    </Link>
-                  );
-                })}
-              </div>
-            );
-          })}
-        </nav>
-        <div className="x-rail-user">
-          <span className="x-avatar" aria-hidden>{initials}</span>
-          <span className="x-user-text"><strong>{user.name}</strong><small>{user.role[0].toUpperCase() + user.role.slice(1)}</small></span>
-          <form action="/auth/signout" method="post"><button className="x-icon" title="Sign out" aria-label="Sign out"><LogOut size={16} /></button></form>
-        </div>
-      </aside>
-      <div className="x-column" data-tone={tone}>
-        <header className="x-topbar">
-          <button className="x-icon x-menu-btn" aria-label={open ? "Close menu" : "Open menu"} aria-expanded={open} onClick={() => setOpen(!open)}><Menu size={20} /></button>
-          <button className="x-icon x-collapse-btn" aria-label={collapsed ? "Show menu" : "Hide menu"} aria-expanded={!collapsed} onClick={() => setCollapsed(!collapsed)}>{collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
-          <TopSearch />
-          <Clocks />
-        </header>
-        <main id="main-content" className="x-main">{children}</main>
-      </div>
-    </div>
-  );
 }

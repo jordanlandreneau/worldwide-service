@@ -466,7 +466,7 @@ span.cc-wave { cursor: default; }
 .svc-menu { display: none; background: none; border: 0; color: #fff; padding: 6px; margin-left: -6px; cursor: pointer; }
 .svc-signout button { display: inline-flex; align-items: center; gap: 8px; background: none; border: 1px solid var(--sapphire-line); color: #aeb7c4; border-radius: var(--radius); padding: 6px 10px; cursor: pointer; font: 500 12px inherit; font-family: inherit; }
 .svc-signout button:hover { color: #fff; border-color: #fff; }
-.svc-main { display: block; }
+.svc-main { display: block; overflow-x: clip; }
 .svc-main .svc { min-height: calc(100vh - 64px); }
 .svc-hero { position: relative; }
 .svc-search { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line-strong); padding: 8px 2px; color: var(--brooklyn); margin-bottom: 18px; }
@@ -481,4 +481,77 @@ span.cc-wave { cursor: default; }
   .svc-top-nav a.active::after { display: none; }
   .svc-signout { margin-left: auto; }
   .svc-brand small { display: none; }
+}
+
+/* ---------- Every page in the BMW guide style ---------- */
+.svc-app { color: var(--ink); --font-bmw: "Archivo", "Helvetica Neue", Arial, sans-serif; }
+.svc-app, .svc-app button, .svc-app input, .svc-app select, .svc-app textarea { font-family: var(--font-bmw); }
+/* Page layout: a dark header band like the guide's hero, then panels on Alpine White. */
+.svc-main > .x-page { max-width: 1320px; margin: 0 auto; padding: 0 32px 56px; }
+.svc-main > .x-page > .x-page-head { background: var(--sapphire); color: #fff; margin: 0 calc(50% - 50vw) 32px; padding: 44px calc(50vw - 50% + 32px) 32px;
+  display: flex; align-items: flex-end; gap: 24px; flex-wrap: wrap; border: 0; }
+.svc-main .x-page-head .x-title { font-stretch: var(--wide); font-weight: 250; font-size: clamp(28px, 3.8vw, 48px); line-height: 1.05; letter-spacing: -.01em; color: #fff; margin: 0; }
+.svc-main .x-page-head .x-subtitle { color: #aeb7c4; margin-top: 10px; font-size: 14px; }
+.svc-main .x-page-head .x-btn { background: transparent; color: #fff; border-color: rgba(255,255,255,.3); }
+.svc-main .x-page-head .x-btn:hover { background: var(--portimao); border-color: var(--portimao); }
+.svc-main .x-page-head .x-btn-primary { background: var(--portimao); border-color: var(--portimao); }
+.svc-main .x-page-head .x-input { background: var(--sapphire-2); border-color: var(--sapphire-line); color: #fff; }
+.svc-main .x-page-head .x-combo { width: 280px; }
+/* Panels */
+.svc-main .x-card { background: var(--mineral); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: none; padding: 24px 28px; }
+.svc-main .x-card-head h2 { font-stretch: var(--wide); font-weight: 400; font-size: 21px; color: var(--ink); letter-spacing: -.005em; }
+.svc-main .x-card-head p { color: var(--brooklyn); }
+.svc-main .x-stack { gap: 24px; }
+/* Controls */
+.svc-main .x-btn { border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--mineral); color: var(--ink); font-weight: 500; box-shadow: none; }
+.svc-main .x-btn:hover { border-color: var(--portimao); color: var(--portimao); }
+.svc-main .x-btn-primary { background: var(--portimao); border-color: var(--portimao); color: #fff; }
+.svc-main .x-btn-primary:hover { background: #174a96; border-color: #174a96; color: #fff; }
+.svc-main .x-input { border-radius: var(--radius); border-color: var(--line-strong); box-shadow: none; }
+.svc-main .x-input:focus { border-color: var(--portimao); outline: 2px solid var(--portimao-tint); }
+.svc-main a.text-accent, .svc-main .text-accent { color: var(--portimao); }
+/* Tables: dark header row like the guide */
+.svc-main .x-table-wrap { border: 1px solid var(--line); border-radius: var(--radius); overflow-x: auto; }
+.svc-main .x-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.svc-main .x-table thead th { background: var(--sapphire); color: #dfe4eb; font-weight: 500; font-size: 13px; text-transform: none; letter-spacing: 0; padding: 10px 14px; border-bottom: 0; white-space: nowrap; }
+.svc-main .x-table td { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.svc-main .x-table tbody tr:last-child td { border-bottom: 0; }
+.svc-main .x-table tbody tr:hover td { background: rgba(31,95,191,.035); }
+.svc-main .x-hours thead th { background: var(--sapphire); color: #dfe4eb; }
+/* Modals */
+.svc-app [role="dialog"] form { border-radius: var(--radius) !important; font-family: var(--font-bmw); }
+.svc-app [role="dialog"] h2 { font-stretch: var(--wide); font-weight: 400; font-size: 20px; }
+
+/* Command Center in the guide style */
+.svc-main > .x-page > .cc-head { background: var(--sapphire); color: #fff; margin: 0 calc(50% - 50vw) 0; padding: 44px calc(50vw - 50% + 32px) 28px; border: 0; }
+.svc-main .cc-logo { background: transparent; border: 1px solid rgba(255,255,255,.25); border-radius: var(--radius); box-shadow: none; color: #fff; }
+.svc-main .cc-title h1 { color: #fff; font-stretch: var(--wide); font-weight: 250; font-size: clamp(28px, 3.8vw, 48px); line-height: 1.05; }
+.svc-main .cc-title p { color: #aeb7c4; margin-top: 8px; }
+.svc-main .cc-tag { background: transparent; color: #8fb4ee; border: 1px solid rgba(143,180,238,.4); border-radius: var(--radius); font-size: 12px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; font-stretch: 100%; }
+.svc-main .cc-head .x-btn { background: transparent; color: #fff; border-color: rgba(255,255,255,.3); }
+.svc-main .cc-head .x-btn:hover { background: var(--portimao); border-color: var(--portimao); color: #fff; }
+.svc-main .cc-primary .x-btn { background: var(--portimao); border-color: var(--portimao); color: #fff; }
+.svc-main .cc-head .x-input { background: var(--sapphire-2); border-color: var(--sapphire-line); color: #fff; }
+.svc-main .cc-tabs { background: var(--sapphire); margin: 0 calc(50% - 50vw) 32px; padding: 0 calc(50vw - 50% + 26px); border-top: 1px solid var(--sapphire-line); border-bottom: 0; gap: 4px; }
+.svc-main .cc-tabs a { color: #aeb7c4; font-weight: 500; font-size: 14px; padding: 15px 14px; border-bottom: 2px solid transparent; position: relative; }
+.svc-main .cc-tabs a:hover { color: #fff; }
+.svc-main .cc-tabs a[data-active="true"] { color: #fff; background: transparent; border-radius: 0; border-bottom-color: var(--portimao); }
+.svc-main .cc-stat, .svc-main .cc-filters, .svc-main .cc-group { border-radius: var(--radius); border-color: var(--line); background: var(--mineral); }
+.svc-main .cc-stat-head { letter-spacing: .12em; font-size: 12px; font-weight: 500; }
+.svc-main .cc-stat-value strong { font-stretch: var(--wide); font-weight: 300; font-size: 38px; }
+.svc-main .cc-stat[data-tone="slate"] .cc-bar i { background: var(--sapphire); }
+.svc-main .cc-group > header { background: var(--mineral); border-bottom: 1px solid var(--line); }
+.svc-main .cc-group-name { font-stretch: var(--wide); font-weight: 400; font-size: 20px; }
+.svc-main .cc-chip { border-radius: var(--radius); background: var(--alpine); border: 1px solid var(--line); }
+.svc-main .cc-add .x-btn { color: var(--portimao); border-color: transparent; background: transparent; }
+.svc-main .cc-wave { border-radius: var(--radius); }
+.svc-main .cc-badge { border-radius: var(--radius); }
+/* Store page tabs (light background) */
+.svc-main .x-stack > .cc-tabs { background: transparent; margin: 0 0 24px; padding: 0; border-bottom: 1px solid var(--line); border-top: 0; }
+.svc-main .x-stack > .cc-tabs a { color: var(--ink-2); }
+.svc-main .x-stack > .cc-tabs a[data-active="true"] { color: var(--ink); border-bottom-color: var(--portimao); }
+@media (max-width: 900px) {
+  .svc-main > .x-page { padding: 0 16px 40px; }
+  .svc-main > .x-page > .x-page-head, .svc-main > .x-page > .cc-head { padding-left: calc(50vw - 50% + 16px); padding-right: calc(50vw - 50% + 16px); padding-top: 28px; }
+  .svc-main .x-page-head .x-combo { width: 100%; }
 }
