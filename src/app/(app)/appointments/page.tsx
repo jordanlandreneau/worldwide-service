@@ -40,7 +40,7 @@ export default async function Appointments({ searchParams }: { searchParams: Pro
     <Page title="Appointments" subtitle={store ? `${store.name}` : staff ? "Every Service store" : "Your stores"} actions={stores.length > 1 ? <StorePicker base="/appointments" stores={stores} selected={store?.name} /> : undefined}>
       {added && <Card><p role="status" className="text-sm">Appointment saved. No text is sent; the store&apos;s CRM confirms it with the customer.</p></Card>}
       {staff && (
-        <div id="set" /><Card title="Set an appointment" note={store ? `Times are ${store.name}'s local time.` : "Choose the store first (top right)."}>
+        <div id="set"><Card title="Set an appointment" note={store ? `Times are ${store.name}'s local time.` : "Choose the store first (top right)."}>
           {store ? (
             <InlineForm action={saveAppointment.bind(null, store.id)} submit="Save appointment">
               <div className="cc-form-grid">
@@ -58,7 +58,7 @@ export default async function Appointments({ searchParams }: { searchParams: Pro
               <Field label="Notes (optional)"><input className="x-input" name="notes" placeholder="Vehicle, service needed, advisor…" /></Field>
             </InlineForm>
           ) : <p className="text-sm text-ink-muted">Pick a store with the store search at the top right, then the form appears here.</p>}
-        </Card>
+        </Card></div>
       )}
       <Card title="Appointments" note={`${(appts ?? []).length} shown${(appts ?? []).length === 500 ? " (latest 500)" : ""}`}>
         <form className="x-filters" style={{ marginBottom: 14 }}>
