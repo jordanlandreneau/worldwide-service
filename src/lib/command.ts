@@ -1,4 +1,5 @@
 "use server";
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/data";
 import type { Result } from "@/lib/manage";
@@ -48,17 +49,31 @@ export async function saveCampaign(storeId: string, id: string | null, _: Result
     launch_date: text(f, "launch_date", 120), script: text(f, "script", 20000), info: text(f, "info", 20000),
     updated_at: new Date().toISOString(),
   };
+  // A CSV can come with the campaign. Check it before saving anything.
+  const file = f.get("file");
+  const hasFile = file instanceof File && file.size > 0;
+  let parsed: Parsed | null = null;
+  if (hasFile) {
+    const p = await readCsv(file);
+    if (typeof p === "string") return { error: p };
+    parsed = p;
+  }
   const client = db();
+  const rowId = id ?? randomUUID();
   if (id) {
     if (!(await campaignInStore(storeId, id))) return { error: "This campaign no longer exists." };
     const { error } = await client.from("campaigns").update(fields).eq("id", id).eq("dealership_id", storeId);
     if (error) return { error: "Couldn't save this campaign." };
   } else {
     const { count } = await client.from("campaigns").select("id", { count: "exact", head: true }).eq("dealership_id", storeId).eq("category", category);
-    const { error } = await client.from("campaigns").insert({ ...fields, dealership_id: storeId, sort_order: count ?? 0, created_by: user.email });
+    const { error } = await client.from("campaigns").insert({ ...fields, id: rowId, dealership_id: storeId, sort_order: count ?? 0, created_by: user.email });
     if (error) return { error: "Couldn't add this campaign." };
   }
-  await client.from("edit_log").insert({ user_email: user.email, table_name: "campaigns", row_id: id ?? storeId, action: id ? "update campaign" : "add campaign" });
+  await client.from("edit_log").insert({ user_email: user.email, table_name: "campaigns", row_id: rowId, action: id ? "update campaign" : "add campaign" });
+  if (parsed && hasFile) {
+    const saved = await saveList(storeId, rowId, file.name, parsed, text(f, "list_note", 1000), user.email);
+    if (!saved) { refresh(); return { error: "The campaign was saved, but its list wasn't. Upload it again from the campaign." }; }
+  }
   refresh();
   return { ok: true };
 }
@@ -136,25 +151,34 @@ function parseCsv(input: string): string[][] {
   return rows;
 }
 
+type Parsed = { columns: string[]; rows: string[][] };
+async function readCsv(file: File): Promise<Parsed | string> {
+  if (!/\.csv$/i.test(file.name)) return "The file must be a .csv file. In Excel or Google Sheets, use File > Download > CSV.";
+  if (file.size > MAX_FILE) return "The file is over 4 MB. Split it into smaller files.";
+  const all = parseCsv(await file.text());
+  if (all.length < 2) return "The file needs a header row and at least one customer.";
+  const rows = all.slice(1);
+  if (rows.length > MAX_ROWS) return `The file has ${rows.length.toLocaleString()} rows. The limit is ${MAX_ROWS.toLocaleString()} per file.`;
+  return { columns: all[0].map((h, i) => h.trim() || `Column ${i + 1}`), rows };
+}
+async function saveList(storeId: string, campaignId: string | null, name: string, p: Parsed, note: string | null, email: string) {
+  const { error } = await db().from("outbound_lists").insert({
+    dealership_id: storeId, campaign_id: campaignId, file_name: name.slice(0, 200), columns: p.columns, rows: p.rows,
+    row_count: p.rows.length, note, uploaded_by: email,
+  });
+  return !error;
+}
+
 export async function uploadList(storeId: string, _: Result, f: FormData): Promise<Result> {
   const user = await member(storeId);
   if (!user) return { error: "You don't have access to this store." };
   const file = f.get("file");
   if (!(file instanceof File) || file.size === 0) return { error: "Choose a CSV file." };
-  if (!/\.csv$/i.test(file.name)) return { error: "The file must be a .csv file. In Excel or Google Sheets, use File > Download > CSV." };
-  if (file.size > MAX_FILE) return { error: "The file is over 4 MB. Split it into smaller files." };
   const campaignId = text(f, "campaign_id", 64);
   if (campaignId && !(await campaignInStore(storeId, campaignId))) return { error: "Choose a campaign from this store." };
-  const all = parseCsv(await file.text());
-  if (all.length < 2) return { error: "The file needs a header row and at least one customer." };
-  const columns = all[0].map((h, i) => h.trim() || `Column ${i + 1}`);
-  const rows = all.slice(1);
-  if (rows.length > MAX_ROWS) return { error: `The file has ${rows.length.toLocaleString()} rows. The limit is ${MAX_ROWS.toLocaleString()} per file.` };
-  const { error } = await db().from("outbound_lists").insert({
-    dealership_id: storeId, campaign_id: campaignId, file_name: file.name.slice(0, 200), columns, rows,
-    row_count: rows.length, note: text(f, "note", 1000), uploaded_by: user.email,
-  });
-  if (error) return { error: "Couldn't save this list." };
+  const p = await readCsv(file);
+  if (typeof p === "string") return { error: p };
+  if (!(await saveList(storeId, campaignId, file.name, p, text(f, "note", 1000), user.email))) return { error: "Couldn't save this list." };
   refresh();
   return { ok: true };
 }

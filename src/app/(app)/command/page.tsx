@@ -52,6 +52,8 @@ function CampaignFields({ c, category, categories }: { c?: Campaign; category?: 
       {input("launch_date", "Launch date", c?.launch_date, "e.g. November 4th")}
       {area("script", "Script", c?.script)}
       {area("info", "Information", c?.info)}
+      <Field label={c ? "Add a CSV list (optional)" : "CSV list (optional)"}><input className="x-input" type="file" name="file" accept=".csv,text/csv" style={{ paddingTop: 8 }} /></Field>
+      <Field label="List note (optional)"><input className="x-input" name="list_note" placeholder="e.g. November recall list" /></Field>
     </>
   );
 }
@@ -77,10 +79,6 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
     client.from("campaign_stats").select("id,campaign_id,stat_date,calls_made,appointments_set,notes,entered_by").eq("dealership_id", store.id).order("stat_date", { ascending: false }).order("created_at", { ascending: false }).limit(2000),
     client.from("outbound_lists").select("id,campaign_id,file_name,row_count,note,uploaded_by,uploaded_at").eq("dealership_id", store.id).order("uploaded_at", { ascending: false }).limit(200),
   ]);
-  let booked = client.from("appointments").select("id", { count: "exact", head: true }).eq("dealership_id", store.id).neq("status", "cancelled");
-  if (/^\d{4}-\d{2}-\d{2}$/.test(from)) booked = booked.gte("created_at", `${from}T00:00:00-05:00`);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(to)) booked = booked.lte("created_at", `${to}T23:59:59-05:00`);
-  const { count: bookedCount } = tab === "analytics" ? await booked : { count: 0 };
   const campaigns = (c1 ?? []) as Campaign[];
   const stats = (s1 ?? []) as Stat[];
   const lists = (l1 ?? []) as List[];
@@ -139,6 +137,12 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
                         {c.list_ref && <><span>List/Sheet:</span> {c.list_ref}</>}
                       </p>
                     )}
+                    {lists.some((l) => l.campaign_id === c.id) && (
+                      <p className="cc-row-meta">
+                        <span>Lists:</span>{" "}
+                        {lists.filter((l) => l.campaign_id === c.id).map((l, i) => <span key={l.id}>{i > 0 && " · "}<a className="text-accent" href={`/command-lists/${l.id}`}>{l.file_name}</a> ({l.row_count.toLocaleString()})</span>)}
+                      </p>
+                    )}
                     {(c.script || c.info) && (
                       <details className="cc-more">
                         <summary>Script &amp; information</summary>
@@ -153,6 +157,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
                         <form action={toggleWave.bind(null, store.id, c.id, 1)}><button className="cc-wave" data-wave="1" data-on={c.wave1_done} aria-pressed={c.wave1_done}>{c.wave1_done ? <Check size={15} aria-hidden /> : <span className="cc-dot" aria-hidden />} Wave 1</button></form>
                         <form action={toggleWave.bind(null, store.id, c.id, 2)}><button className="cc-wave" data-wave="2" data-on={c.wave2_done} aria-pressed={c.wave2_done}>{c.wave2_done ? <Check size={15} aria-hidden /> : <span className="cc-dot" aria-hidden />} Wave 2</button></form>
                         <span className="cc-sep" aria-hidden />
+                        <ModalForm button="Upload CSV" title={`Upload a list to ${c.name}`} note="A CSV file with a header row. Up to 20,000 rows." submit="Upload" action={uploadList.bind(null, store.id)}><input type="hidden" name="campaign_id" value={c.id} /><Field label="CSV file"><input className="x-input" type="file" name="file" accept=".csv,text/csv" required style={{ paddingTop: 8 }} /></Field><Field label="Note (optional)"><input className="x-input" name="note" /></Field></ModalForm>
                         <ModalForm button="Edit" title={`Edit ${c.name}`} action={saveCampaign.bind(null, store.id, c.id)}><CampaignFields c={c} categories={categories} /></ModalForm>
                         <ActionButton label="Delete" confirm={`Delete ${c.name}? Its analytics entries are deleted too.`} action={deleteCampaign.bind(null, store.id, c.id)} />
                       </>
@@ -160,6 +165,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
                       <>
                         <span className="cc-wave" data-wave="1" data-on={c.wave1_done}>{c.wave1_done ? <Check size={15} aria-hidden /> : <span className="cc-dot" aria-hidden />} Wave 1</span>
                         <span className="cc-wave" data-wave="2" data-on={c.wave2_done}>{c.wave2_done ? <Check size={15} aria-hidden /> : <span className="cc-dot" aria-hidden />} Wave 2</span>
+                        {canUpload && <><span className="cc-sep" aria-hidden /><ModalForm button="Upload CSV" title={`Upload a list to ${c.name}`} note="A CSV file with a header row. Up to 20,000 rows." submit="Upload" action={uploadList.bind(null, store.id)}><input type="hidden" name="campaign_id" value={c.id} /><Field label="CSV file"><input className="x-input" type="file" name="file" accept=".csv,text/csv" required style={{ paddingTop: 8 }} /></Field><Field label="Note (optional)"><input className="x-input" name="note" /></Field></ModalForm></>}
                       </>
                     )}
                   </div>
@@ -200,7 +206,6 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
           <StatCard label="Outbound calls" icon={<PhoneCall size={18} aria-hidden />} value={calls} note={from || to ? "In the chosen dates" : "All time"} tone="slate" bar={100} />
           <StatCard label="Appointments set" icon={<CalendarDays size={18} aria-hidden />} value={appts} note={`${pct(appts, calls)}% of calls set an appointment`} tone="green" bar={pct(appts, calls)} />
           <StatCard label="Last 7 days" icon={<Clock size={18} aria-hidden />} value={recent.reduce((a, s) => a + s.calls_made, 0)} note={`${recent.reduce((a, s) => a + s.appointments_set, 0)} appointments set`} tone="blue" bar={100} />
-          <StatCard label="Booked on the site" icon={<CalendarDays size={18} aria-hidden />} value={bookedCount ?? 0} note="From the Appointments page (not cancelled)" tone="amber" bar={100} />
           <StatCard label="Campaigns finished" icon={<ShieldCheck size={18} aria-hidden />} value={both} of={total} note={`${pct(both, total)}% have both waves done`} tone="violet" bar={pct(both, total)} />
         </div>
         <Card title="By campaign" note="Calls and appointments come from the Analytics Breakdown entries.">
