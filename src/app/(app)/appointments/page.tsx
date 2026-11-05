@@ -78,7 +78,7 @@ export default async function Appointments({ searchParams }: { searchParams: Pro
               showLocal(a.appt_at, (s?.timezone as string | undefined) ?? "America/New_York"),
               ...(store ? [] : [s?.name ?? "—"]),
               a.customer_name, a.phone, a.campaign_id ? campName.get(a.campaign_id) ?? "—" : "—",
-              staff ? (
+              atLeast(user.role, "manager") ? (
                 <form key="s" action={setAppointmentStatus.bind(null, a.id)} className="x-filters" style={{ flexWrap: "nowrap" }}>
                   <select className="x-input" name="status" defaultValue={a.status} aria-label="Status" style={{ height: 32 }}>{STATUS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
                   <button className="x-btn" style={{ height: 32 }}>Save</button>

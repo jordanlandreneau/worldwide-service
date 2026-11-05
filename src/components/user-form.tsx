@@ -54,12 +54,12 @@ export function UserForm({ mode, values, teams, stores, roles, action, submit }:
             </label>
           )}
         </div>
-        {mode === "invite" && <p className="type-caption text-ink-muted" style={{ marginTop: 10 }}>Invited users receive an email to set their password. Status starts as Invited.</p>}
+        {mode === "invite" && <p className="type-caption text-ink-muted" style={{ marginTop: 10 }}>Choose <strong>Dealership</strong> for store staff, then tick their stores below. They receive an email to set their password; status starts as Invited.</p>}
       </Card>
       <Card title="Organization">
         {role === "dealership" ? (
           <div style={col}>
-            <span className={label}>Dealerships</span>
+            <span className={label}>Stores they can see</span>
             <input className="x-input" placeholder="Select dealerships" aria-label="Search dealerships" value={q} onChange={(e) => setQ(e.target.value)} />
             <div style={{ maxHeight: 260, overflow: "auto", border: "1px solid #e3e5e8", borderRadius: 8, padding: 8 }}>
               {list.map((s) => (

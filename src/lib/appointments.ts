@@ -47,7 +47,7 @@ export async function saveAppointment(storeId: string, _: Result, f: FormData): 
 
 export async function setAppointmentStatus(id: string, f: FormData) {
   const { user } = await requireScoped();
-  if (user.role === "dealership" || !UUID.test(id)) return;
+  if (!atLeast(user.role, "manager") || !UUID.test(id)) return;
   const status = String(f.get("status") ?? "");
   if (!STATUSES.includes(status)) return;
   await db().from("appointments").update({ status, updated_at: new Date().toISOString() }).eq("id", id);

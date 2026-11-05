@@ -29,6 +29,9 @@ export default async function StorePage({ params, searchParams }: { params: Prom
     dept ? client.from("crm_credentials").select("id,crm_type,username,login_url,has_password").eq("dealership_id", id).eq("department_id", dept.id) : Promise.resolve({ data: [] as any[] }),
     client.from("service_profiles").select("data").eq("dealership_id", id).maybeSingle(),
   ]);
+  const { data: links } = await client.from("user_dealerships").select("user_id").eq("dealership_id", id);
+  const userIds = ((links ?? []) as any[]).map((l) => l.user_id as string);
+  const { data: storeUsers } = userIds.length ? await client.from("app_users").select("id,first_name,last_name,email,status,last_sign_in_at").in("id", userIds).order("first_name") : { data: [] as any[] };
   const hours = ((profile?.data as any)?.hours ?? []).filter((h: any) => h.departmentName === "Service");
   const hourFor = (d: number) => hours.find((h: any) => h.dayOfWeek === d);
   const loginFields = (l?: any) => (
@@ -65,6 +68,18 @@ export default async function StorePage({ params, searchParams }: { params: Prom
               <ModalForm button="Edit" title={`Edit ${l.crm_type ?? "login"}`} action={saveServiceLogin.bind(null, id, l.id)}>{loginFields(l)}</ModalForm>
               <ActionButton label="Delete" confirm="Delete this login?" action={deleteServiceLogin.bind(null, id, l.id)} />
             </span>,
+          ])}
+        />
+      </Card>
+      <Card title="Store logins" note="People at this store who can sign in. They see only the stores they're given.">
+        <div style={{ marginBottom: 12 }}><Link className="x-btn x-btn-primary" href={`/users/new?store=${id}`} style={{ display: "inline-flex", alignItems: "center" }}>+ Create store user</Link></div>
+        <Table
+          head={["Name", "Email", "Status", "Last sign-in", ""]}
+          empty="No store users yet."
+          rows={((storeUsers ?? []) as any[]).map((u) => [
+            `${u.first_name} ${u.last_name}`.trim() || "—", u.email, u.status[0].toUpperCase() + u.status.slice(1),
+            u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Never",
+            <Link key="e" className="x-btn" href={`/users/${u.id}/edit`} style={{ display: "inline-flex", alignItems: "center" }}>Edit access</Link>,
           ])}
         />
       </Card>

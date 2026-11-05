@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/data";
 import type { Result } from "@/lib/manage";
+import { atLeast } from "@/lib/access";
 import { requireScoped } from "@/lib/scope";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -14,15 +15,17 @@ const text = (f: FormData, k: string, max = 4000) => {
 };
 const refresh = () => revalidatePath("/command");
 
-// Worldwide staff edit the board. Store logins can only see their own stores and upload lists.
+// Managers and admins edit the board and mark completion. Agents only view.
+// Store logins see their own stores and upload lists; they can't mark completion.
 async function staff(storeId: string) {
   const { user } = await requireScoped();
-  if (user.role === "dealership" || !UUID.test(storeId)) return null;
+  if (!atLeast(user.role, "manager") || !UUID.test(storeId)) return null;
   return user;
 }
 async function member(storeId: string) {
   const { user, stores } = await requireScoped();
   if (!UUID.test(storeId) || (stores !== null && !stores.includes(storeId))) return null;
+  if (user.role === "agent") return null;
   return user;
 }
 async function campaignInStore(storeId: string, id: string | null) {

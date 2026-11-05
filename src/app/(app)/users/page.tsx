@@ -32,7 +32,7 @@ export default async function Users({ searchParams }: { searchParams: Promise<Se
     .filter((u) => !team || u.team_id === team)
     .sort((a, b) => (sort === "email" ? a.email.localeCompare(b.email) : sort === "signin" ? String(b.last_sign_in_at ?? "").localeCompare(String(a.last_sign_in_at ?? "")) : sort === "updated" ? String(b.updated_at).localeCompare(String(a.updated_at)) : name(a).localeCompare(name(b))));
   return (
-    <Page title="Users" subtitle={`${shown.length} shown · ${users.length} total`} actions={<Link href="/users/new" className="x-btn x-btn-primary" style={{ display: "inline-flex", alignItems: "center" }}>Invite user</Link>}>
+    <Page title="Users" subtitle={`${shown.length} shown · ${users.length} total`} actions={<Link href="/users/new" className="x-btn x-btn-primary" style={{ display: "inline-flex", alignItems: "center" }}>+ Create user</Link>}>
       <Card>
         <form className="x-filters">
           <input className="x-input" name="q" defaultValue={q} placeholder="Name or email" aria-label="Search" />

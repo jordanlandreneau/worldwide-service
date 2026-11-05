@@ -6,6 +6,7 @@ import { StorePicker } from "@/components/store-picker";
 import { Card, Table } from "@/components/ui";
 import { addStat, deleteCampaign, deleteList, deleteStat, saveCampaign, toggleWave, uploadList } from "@/lib/command";
 import { db, fetchAll } from "@/lib/data";
+import { atLeast } from "@/lib/access";
 import { requireScoped } from "@/lib/scope";
 
 export const metadata = { title: "Command Center · Worldwide Service" };
@@ -61,7 +62,10 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
   const tab = TABS.some(([k]) => k === rawTab) ? rawTab : "matrix";
   const stores = (await fetchAll<any>("dealerships", "id,name,active", "name")).filter((s: any) => s.active !== false && (scope === null || scope.includes(s.id))) as { id: string; name: string }[];
   const store = stores.find((s) => s.id === d) ?? stores[0];
-  const staff = user.role !== "dealership";
+  // staff = can edit campaigns, mark waves and enter analytics (managers and admins).
+  const staff = atLeast(user.role, "manager");
+  const worldwide = user.role !== "dealership";
+  const canUpload = !worldwide || staff;
 
   if (!store) {
     return <div className="x-page"><Card><p className="text-sm text-ink-muted">No stores are assigned to your login yet. Ask Worldwide BDC to add your store.</p></Card></div>;
@@ -259,7 +263,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
   if (tab === "lists") {
     body = (
       <>
-        <Card title="Upload an outbound list" note="A CSV file of customers to call, with a header row (for example: First name, Last name, Phone, Vehicle, Last service). Up to 20,000 rows per file.">
+        {canUpload && <Card title="Upload an outbound list" note="A CSV file of customers to call, with a header row (for example: First name, Last name, Phone, Vehicle, Last service). Up to 20,000 rows per file.">
           <InlineForm action={uploadList.bind(null, store.id)} submit="Upload list">
             <div className="cc-form-grid">
               <Field label="CSV file"><input className="x-input" type="file" name="file" accept=".csv,text/csv" required style={{ paddingTop: 8 }} /></Field>
@@ -267,7 +271,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
             </div>
             <Field label="Note (optional)"><input className="x-input" name="note" placeholder="e.g. Recall list for November" /></Field>
           </InlineForm>
-        </Card>
+        </Card>}
         <Card title="Uploaded lists">
           <Table
             head={["File", "Campaign", "Customers", "Note", "Uploaded by", "When", ""]}
@@ -294,9 +298,9 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
         </div>
         <div className="cc-head-actions">
           {stores.length > 1 && <StorePicker base="/command" stores={stores} selected={store.name} />}
-          {staff && <Link className="x-btn" href={`/service/info?d=${store.id}`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><KeyRound size={15} aria-hidden /> BDC Logins</Link>}
+          {worldwide && <Link className="x-btn" href={`/service/info?d=${store.id}`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><KeyRound size={15} aria-hidden /> BDC Logins</Link>}
           {staff && <span className="cc-primary"><ModalForm button="+ New Campaign Task" title="New campaign task" submit="Add" action={saveCampaign.bind(null, store.id, null)}><CampaignFields categories={categories} /></ModalForm></span>}
-          {!staff && <Link className="x-btn" href={`/command?${new URLSearchParams({ d: store.id, tab: "lists" })}`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Upload size={15} aria-hidden /> Upload a list</Link>}
+          {!worldwide && <Link className="x-btn" href={`/command?${new URLSearchParams({ d: store.id, tab: "lists" })}`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Upload size={15} aria-hidden /> Upload a list</Link>}
         </div>
       </header>
       <nav className="cc-tabs" role="tablist">
