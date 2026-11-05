@@ -620,3 +620,10 @@ span.cc-wave { cursor: default; }
 .ref-none { color: var(--brooklyn); }
 .ref-import { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .ref-import p { margin: 0; flex: 1; min-width: 260px; }
+
+/* Reports in the guide style */
+.svc-main .x-stats .x-stat { border-radius: var(--radius); border: 1px solid var(--line); background: var(--mineral); box-shadow: none; }
+.svc-main .x-stat strong { font-stretch: var(--wide); font-weight: 300; font-size: 34px; color: var(--ink); }
+.svc-main .x-stat span { letter-spacing: .1em; text-transform: uppercase; font-size: 12px; color: var(--brooklyn); }
+.svc-main .x-tab { border-radius: var(--radius); }
+.svc-main .x-tab[data-on="true"] { background: var(--sapphire); color: #fff; }

@@ -14,6 +14,7 @@ const GROUPS: { label: string; items: { label: string; href: string; icon: typeo
     { label: "Reference Library", href: "/service/glossary", icon: Library, min: "agent" },
     { label: "Service Data", href: "/service/info", icon: CircleHelp, min: "dealership" },
     { label: "Appointments", href: "/appointments", icon: CalendarClock, min: "dealership" },
+    { label: "Appointment Report", href: "/reports/appointments", icon: BarChart3, min: "manager" },
     { label: "Codes", href: "/codes", icon: KeyRound, min: "agent" },
     { label: "Request a change", href: "/requests", icon: MessageSquare, min: "dealership" },
   ] },
