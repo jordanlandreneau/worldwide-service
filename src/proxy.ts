@@ -1,9 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { OLD_HOSTS, SITE_URL } from "@/lib/site";
 
 const PUBLIC = ["/login", "/auth/callback", "/auth/accept", "/forgot-password", "/no-access"];
 
 export async function proxy(request: NextRequest) {
+  // Send the old Vercel address to service.worldwide-home.com, keeping the page.
+  if (OLD_HOSTS.includes(request.headers.get("host") ?? "")) {
+    return NextResponse.redirect(new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, SITE_URL), 308);
+  }
   let response = NextResponse.next({ request });
   if (process.env.NODE_ENV === "development" && process.env.DEV_USER_ROLE) return response;
   const supabase = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {

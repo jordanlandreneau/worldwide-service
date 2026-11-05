@@ -1,4 +1,5 @@
 "use server";
+import { SITE_URL } from "@/lib/site";
 import { revalidatePath } from "next/cache";
 import { atLeast } from "@/lib/access";
 import { db } from "@/lib/data";
@@ -11,7 +12,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STATUSES = ["open", "in_progress", "done", "declined"];
 // Who gets the email. CHANGE_REQUEST_EMAILS in Vercel (comma separated) overrides this list.
 const RECIPIENTS = () => (process.env.CHANGE_REQUEST_EMAILS ?? "lauren@worldwidebdc.com,leanetm@worldwidebdc.com").split(",").map((s) => s.trim()).filter(Boolean);
-const site = () => (process.env.NEXT_PUBLIC_SITE_URL ?? "").replace(/\/$/, "");
+const site = () => SITE_URL;
 
 export async function submitRequest(_: Result, f: FormData): Promise<Result> {
   const { user, stores } = await requireScoped();

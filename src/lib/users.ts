@@ -1,4 +1,5 @@
 "use server";
+import { SITE_URL } from "@/lib/site";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/access";
 import { db } from "@/lib/data";
@@ -8,7 +9,7 @@ const ROLES = ["agent", "manager", "admin", "dealership"];
 export type FormState = { error?: string; notice?: string };
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const site = () => (process.env.NEXT_PUBLIC_SITE_URL ?? "").replace(/\/$/, "");
+const site = () => SITE_URL;
 const likeSafe = (v: string) => v.replace(/[\\%_]/g, "\\$&");
 
 async function sendEmail(to: string, subject: string, heading: string, body: string, link: string, action: string) {
