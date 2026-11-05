@@ -25,7 +25,7 @@ async function store(email: string, id: string, data: Record<string, any>, actio
   const { error } = await client.from("service_profiles").upsert({ dealership_id: id, data });
   if (error) return { error: "Couldn't save this." };
   await client.from("edit_log").insert({ user_email: email, table_name: "service_profiles", row_id: id, action });
-  revalidatePath("/service/manage");
+  revalidatePath(`/stores/${id}`);
   revalidatePath("/service/info");
   return { ok: true };
 }

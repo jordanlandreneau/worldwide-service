@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ActionButton, Field, InlineForm, ModalForm } from "@/components/action-form";
+import { DATA_TABS, ServiceDataEditor } from "@/components/service-data-editor";
 import { StoreFields } from "@/components/store-form";
 import { Card, Page, Table } from "@/components/ui";
 import { requireUser } from "@/lib/access";
@@ -11,10 +12,11 @@ export const metadata = { title: "Store · Worldwide Service" };
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const ORDER = [1, 2, 3, 4, 5, 6, 0];
 
-export default async function StorePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ added?: string }> }) {
+export default async function StorePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ added?: string; tab?: string }> }) {
   await requireUser("admin");
   const { id } = await params;
-  const { added } = await searchParams;
+  const { added, tab: rawTab = "store" } = await searchParams;
+  const tab = DATA_TABS.some(([k]) => k === rawTab) ? rawTab : "store";
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const client = db();
   const [{ data: store }, { data: dept }] = await Promise.all([
@@ -38,8 +40,15 @@ export default async function StorePage({ params, searchParams }: { params: Prom
     </>
   );
   return (
-    <Page title={store.name} subtitle="Store details, JustCall numbers, Service login and hours" actions={<span className="x-filters"><Link className="x-btn" href={`/service/info?d=${id}`} style={{ display: "inline-flex", alignItems: "center" }}>Open Service Data</Link><Link className="x-btn x-btn-primary" href={`/service/manage?d=${id}&tab=general`} style={{ display: "inline-flex", alignItems: "center" }}>Edit Service Data</Link></span>}>
-      {added && <Card><p role="status" className="text-sm">Store added. Add its Service login and hours below, then fill in its Service Data (pricing, contacts, notes) with <strong>Edit Service Data</strong>.</p></Card>}
+    <Page title={store.name} subtitle="Everything for this store: details, JustCall numbers, Service login, hours and Service Data" actions={<span className="x-filters"><Link className="x-btn" href={`/service/info?d=${id}`} style={{ display: "inline-flex", alignItems: "center" }}>Open Service Data</Link></span>}>
+      <nav className="cc-tabs" role="tablist" aria-label="Store sections">
+        {([["store", "Store, logins & hours"], ...DATA_TABS] as const).map(([k, label]) => (
+          <Link key={k} role="tab" aria-selected={tab === k} data-active={tab === k} href={`/stores/${id}${k === "store" ? "" : `?tab=${k}`}`}>{label}</Link>
+        ))}
+      </nav>
+      {tab !== "store" ? <ServiceDataEditor id={id} tab={tab} /> : (
+        <>
+      {added && <Card><p role="status" className="text-sm">Store added. Add its Service login and hours below, then fill in its Service Data (pricing, contacts, notes) with the tabs above.</p></Card>}
       <Card title="Store">
         <InlineForm action={saveStore.bind(null, id)} submit="Save store">
           <StoreFields s={store} serviceLine={(line as any)?.just_call_number ?? null} />
@@ -79,6 +88,8 @@ export default async function StorePage({ params, searchParams }: { params: Prom
           </table>
         </InlineForm>
       </Card>
+        </>
+      )}
     </Page>
   );
 }

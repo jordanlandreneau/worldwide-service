@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { clock, HoursGrid } from "@/components/hours-grid";
 import Link from "next/link";
 import { LiveClock } from "@/components/live-clock";
+import { SectionSearch } from "@/components/section-search";
 import { ServiceLogins } from "@/components/service-logins";
 import { StorePicker } from "@/components/store-picker";
 import { External } from "@/components/ui";
@@ -126,10 +127,11 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
 
       <div className="svc-layout">
         <aside className="svc-sidebar">
+          <SectionSearch />
           <nav className="svc-nav" aria-label="Sections">
             {nav.map((n) => <a key={n.id} href={`#${n.id}`} className={n.alert ? "alert" : undefined}>{n.label}</a>)}
           </nav>
-          {user.role === "admin" && <Link className="svc-edit-link" href={`/service/manage?d=${id}&tab=general`}>Edit Service Data</Link>}
+          {user.role === "admin" && <Link className="svc-edit-link" href={`/stores/${id}?tab=general`}>Edit this store</Link>}
         </aside>
 
         <div className="svc-content">

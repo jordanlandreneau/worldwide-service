@@ -17,7 +17,6 @@ const GROUPS: { label: string; items: { label: string; href: string; icon: typeo
   ] },
   { label: "Admin", items: [
     { label: "Stores", href: "/stores", icon: Store, min: "admin" },
-    { label: "Service Admin", href: "/service/manage", icon: SlidersHorizontal, min: "admin" },
     { label: "Users", href: "/users", icon: UserCog, min: "manager" },
   ] },
 ];
@@ -36,6 +35,29 @@ export function Shell({ user, children }: { user: { name: string; role: Role }; 
   const here = GROUPS.flatMap((g) => g.items).find((i) => matches(i.href));
   const tone = (here && TONES[here.href]) ?? "blue";
   const initials = user.name.split(/[\s.@]+/).slice(0, 2).map((s) => s[0]?.toUpperCase()).join("");
+  // Service Data is laid out like the BMW Service & Scheduling Guide, top bar included.
+  if (path.startsWith("/service/info")) {
+    const links = GROUPS.flatMap((g) => g.items).filter((i) => RANK[user.role] >= RANK[i.min]);
+    return (
+      <div className="svc-app">
+        <header className="svc-top">
+          <div className="svc-top-inner">
+            <button className="svc-menu" aria-label={open ? "Close menu" : "Open menu"} aria-expanded={open} onClick={() => setOpen(!open)}><Menu size={22} /></button>
+            <Link href="/service/info" className="svc-brand">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img alt="" src="/brand/logo-worldwide-mark-light.svg" width={30} height={30} />
+              <span><strong>Worldwide Service</strong><small>Service &amp; Scheduling Guide</small></span>
+            </Link>
+            <nav className="svc-top-nav" data-open={open} aria-label="Pages">
+              {links.map((i) => <Link key={i.href} href={i.href} onClick={() => setOpen(false)} className={matches(i.href) ? "active" : undefined} aria-current={matches(i.href) ? "page" : undefined}>{i.label}</Link>)}
+            </nav>
+            <form action="/auth/signout" method="post" className="svc-signout"><button title={`Sign out ${user.name}`} aria-label="Sign out"><span aria-hidden>{initials}</span><LogOut size={15} /></button></form>
+          </div>
+        </header>
+        <main id="main-content" className="svc-main">{children}</main>
+      </div>
+    );
+  }
   return (
     <div className="x-app" data-collapsed={collapsed}>
       {open && <button className="x-scrim" aria-label="Close menu" onClick={() => setOpen(false)} />}

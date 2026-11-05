@@ -363,7 +363,7 @@ span.cc-wave { cursor: default; }
 }
 
 /* ---------- Service Data: laid out like the BMW Service & Scheduling Guide ---------- */
-.svc { --sapphire: #10161f; --sapphire-2: #1a2230; --sapphire-line: rgba(255,255,255,.09); --alpine: #f5f6f8; --mineral: #fff;
+.svc, .svc-app { --sapphire: #10161f; --sapphire-2: #1a2230; --sapphire-line: rgba(255,255,255,.09); --alpine: #f5f6f8; --mineral: #fff;
   --ink: #141a22; --ink-2: #3a4350; --brooklyn: #7d8590; --line: #e3e6eb; --line-strong: #cfd4db;
   --portimao: #1f5fbf; --portimao-tint: #eaf1fb; --signal: #c81e2c; --radius: 3px; --wide: 125%;
   font-family: "Archivo", "Helvetica Neue", Arial, sans-serif; color: var(--ink); background: var(--alpine); margin: 0; min-height: 100%; }
@@ -449,4 +449,36 @@ span.cc-wave { cursor: default; }
   .svc-picker { width: 100%; }
   .svc-section-head { padding: 20px 18px 0; }
   .svc-section-body { padding: 12px 18px 18px; }
+}
+
+/* BMW-style top bar for Service Data */
+.svc-app { min-height: 100vh; background: var(--alpine); font-family: "Archivo", "Helvetica Neue", Arial, sans-serif; }
+.svc-top { position: sticky; top: 0; z-index: 50; background: var(--sapphire); border-bottom: 1px solid var(--sapphire-line); }
+.svc-top-inner { display: flex; align-items: center; gap: 28px; height: 64px; padding: 0 32px; max-width: 1320px; margin: 0 auto; }
+.svc-brand { display: flex; align-items: center; gap: 12px; color: #fff; text-decoration: none; line-height: 1.15; flex: none; }
+.svc-brand span { display: flex; flex-direction: column; }
+.svc-brand strong { font-stretch: var(--wide); font-weight: 500; font-size: 15px; letter-spacing: .02em; }
+.svc-brand small { color: #8c96a5; font-size: 12px; }
+.svc-top-nav { display: flex; gap: 4px; margin-left: auto; overflow-x: auto; scrollbar-width: none; }
+.svc-top-nav a { position: relative; color: #aeb7c4; text-decoration: none; padding: 8px 12px; font-size: 14px; font-weight: 500; white-space: nowrap; }
+.svc-top-nav a:hover, .svc-top-nav a.active { color: #fff; }
+.svc-top-nav a.active::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -13px; height: 2px; background: var(--portimao); }
+.svc-menu { display: none; background: none; border: 0; color: #fff; padding: 6px; margin-left: -6px; cursor: pointer; }
+.svc-signout button { display: inline-flex; align-items: center; gap: 8px; background: none; border: 1px solid var(--sapphire-line); color: #aeb7c4; border-radius: var(--radius); padding: 6px 10px; cursor: pointer; font: 500 12px inherit; font-family: inherit; }
+.svc-signout button:hover { color: #fff; border-color: #fff; }
+.svc-main { display: block; }
+.svc-main .svc { min-height: calc(100vh - 64px); }
+.svc-hero { position: relative; }
+.svc-search { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line-strong); padding: 8px 2px; color: var(--brooklyn); margin-bottom: 18px; }
+.svc-search:focus-within { border-bottom-color: var(--portimao); color: var(--portimao); }
+.svc-search input { border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 14px; width: 100%; }
+.svc-search-none { color: var(--brooklyn); font-size: 13px; margin: -8px 0 14px; }
+@media (max-width: 900px) {
+  .svc-top-inner { padding: 0 16px; gap: 14px; }
+  .svc-menu { display: block; }
+  .svc-top-nav { display: none; position: absolute; top: 64px; left: 0; right: 0; flex-direction: column; background: var(--sapphire); padding: 8px 16px 16px; border-bottom: 1px solid var(--sapphire-line); margin: 0; }
+  .svc-top-nav[data-open="true"] { display: flex; }
+  .svc-top-nav a.active::after { display: none; }
+  .svc-signout { margin-left: auto; }
+  .svc-brand small { display: none; }
 }
