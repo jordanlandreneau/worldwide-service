@@ -555,3 +555,13 @@ span.cc-wave { cursor: default; }
   .svc-main > .x-page > .x-page-head, .svc-main > .x-page > .cc-head { padding-left: calc(50vw - 50% + 16px); padding-right: calc(50vw - 50% + 16px); padding-top: 28px; }
   .svc-main .x-page-head .x-combo { width: 100%; }
 }
+
+/* Full-width header bands, content centered at the guide's width (replaces the 50vw offsets above). */
+.svc-app { --gutter: max(32px, calc((100% - 1256px) / 2)); }
+.svc-main > .x-page { max-width: none !important; padding: 0 0 56px !important; margin: 0 !important; }
+.svc-main > .x-page > .x-page-head, .svc-main > .x-page > .cc-head, .svc-main > .x-page > .cc-tabs {
+  margin-left: 0 !important; margin-right: 0 !important; border-radius: 0 !important; padding-left: var(--gutter) !important; padding-right: var(--gutter) !important; }
+.svc-main > .x-page > .x-page-head { margin-bottom: 32px !important; }
+.svc-main > .x-page > .cc-tabs { margin-bottom: 32px !important; padding-left: calc(var(--gutter) - 14px) !important; }
+.svc-main > .x-page > :not(.x-page-head):not(.cc-head):not(.cc-tabs) { margin-left: var(--gutter); margin-right: var(--gutter); }
+@media (max-width: 900px) { .svc-app { --gutter: 16px; } }
