@@ -65,7 +65,7 @@ export const getUser = cache(async (): Promise<SessionUser | null> => {
 export async function requireUser(min: Role = "agent"): Promise<SessionUser> {
   const user = await getUser();
   if (!user) redirect("/no-access");
-  if (user.role === "dealership") redirect("/no-access");
+  if (user.role === "dealership") redirect("/service/info");
   if (RANK[user.role] < RANK[min]) redirect("/service/info");
   return user;
 }

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { clock, HoursGrid } from "@/components/hours-grid";
 import { StorePicker } from "@/components/store-picker";
 import { Card, External, Page, Table } from "@/components/ui";
-import { requireUser } from "@/lib/access";
+import { requireScoped } from "@/lib/scope";
 import { db } from "@/lib/data";
 
 export const metadata = { title: "Service Data · Worldwide Service" };
@@ -33,10 +33,11 @@ function Answer({ k, value }: { k: string; value: unknown }) {
 const Facts = ({ items }: { items: [string, ReactNode][] }) => <dl className="x-facts">{items.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>;
 
 export default async function ServiceData({ searchParams }: { searchParams: Promise<{ d?: string }> }) {
-  await requireUser();
+  // Dealership logins only see their own stores.
+  const { stores: scope } = await requireScoped();
   const { d } = await searchParams;
   const { data: rows } = await db().from("service_profiles").select("dealership_id,data->dealership->>name");
-  const stores = (rows ?? []).map((r: any) => ({ id: r.dealership_id as string, name: (r.name ?? "") as string })).sort((a, b) => a.name.localeCompare(b.name));
+  const stores = (rows ?? []).filter((r: any) => scope === null || scope.includes(r.dealership_id)).map((r: any) => ({ id: r.dealership_id as string, name: (r.name ?? "") as string })).sort((a, b) => a.name.localeCompare(b.name));
   const id = d && stores.some((s) => s.id === d) ? d : stores[0]?.id;
   const [{ data: row }, { data: store }] = id
     ? await Promise.all([db().from("service_profiles").select("data").eq("dealership_id", id).maybeSingle(), db().from("dealerships").select("logo_url,timezone").eq("id", id).maybeSingle()])

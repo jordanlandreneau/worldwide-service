@@ -11,15 +11,18 @@ import type { Role } from "@/lib/access";
 const GROUPS: { label: string; items: { label: string; href: string; icon: typeof Info; min: Role }[] }[] = [
   { label: "Service", items: [
     { label: "Reference Library", href: "/service/glossary", icon: Library, min: "agent" },
-    { label: "Service Data", href: "/service/info", icon: CircleHelp, min: "agent" },
+    { label: "Service Data", href: "/service/info", icon: CircleHelp, min: "dealership" },
+    { label: "Store Info", href: "/store-info", icon: Store, min: "agent" },
+    { label: "Codes", href: "/codes", icon: KeyRound, min: "agent" },
   ] },
   { label: "Admin", items: [
     { label: "Service Admin", href: "/service/manage", icon: SlidersHorizontal, min: "admin" },
+    { label: "Users", href: "/users", icon: UserCog, min: "manager" },
   ] },
 ];
 // Every page has its own color, so it's easy to tell where you are.
 const TONES: Record<string, string> = {
-  "/service/info": "indigo", "/service/glossary": "green",
+  "/service/info": "indigo", "/service/glossary": "green", "/store-info": "cyan", "/codes": "violet", "/users": "pink",
   "/service/manage": "amber",
 };
 const RANK: Record<Role, number> = { dealership: 0, agent: 1, manager: 2, admin: 3 };
