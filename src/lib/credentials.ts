@@ -39,9 +39,10 @@ export async function revealPassword(
     rules_acknowledged: context === "info" ? required.length : 0,
   });
   if (logError) return { error: "Couldn't record this reveal, so the password stays locked." };
+  if (!process.env.CRM_PRIVATE_KEY) return { error: "Passwords can't be opened yet: CRM_PRIVATE_KEY isn't set in Vercel." };
   try {
     return { password: decrypt(cred.password_ciphertext as string, cred.id as string) };
   } catch {
-    return { error: "This password couldn't be decrypted." };
+    return { error: "This password couldn't be decrypted. Check that CRM_PRIVATE_KEY in Vercel is the same key 4.0 uses." };
   }
 }

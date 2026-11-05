@@ -565,3 +565,7 @@ span.cc-wave { cursor: default; }
 .svc-main > .x-page > .cc-tabs { margin-bottom: 32px !important; padding-left: calc(var(--gutter) - 14px) !important; }
 .svc-main > .x-page > :not(.x-page-head):not(.cc-head):not(.cc-tabs) { margin-left: var(--gutter); margin-right: var(--gutter); }
 @media (max-width: 900px) { .svc-app { --gutter: 16px; } }
+.svc-login li { flex-wrap: wrap; align-items: center; }
+.svc-secret { color: #fff; user-select: text; -webkit-user-select: text; cursor: text; overflow-wrap: anywhere; flex: 1; min-width: 80px; font-variant-numeric: tabular-nums; }
+.svc-icon-btn { display: inline-flex; align-items: center; gap: 5px; font: 500 12px var(--font-bmw, inherit); color: #aeb7c4; background: none; border: 1px solid rgba(255,255,255,.2); border-radius: var(--radius); padding: 4px 9px; cursor: pointer; }
+.svc-icon-btn:hover { color: #fff; border-color: #fff; }
