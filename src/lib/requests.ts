@@ -15,6 +15,7 @@ const site = () => (process.env.NEXT_PUBLIC_SITE_URL ?? "").replace(/\/$/, "");
 
 export async function submitRequest(_: Result, f: FormData): Promise<Result> {
   const { user, stores } = await requireScoped();
+  if (user.role === "agent") return { error: "You don't have access to this." };
   const storeId = String(f.get("dealership_id") ?? "").trim() || null;
   if (storeId && (!UUID.test(storeId) || (stores !== null && !stores.includes(storeId)))) return { error: "Choose one of your stores." };
   if (!storeId && user.role === "dealership") return { error: "Choose the store this is for." };

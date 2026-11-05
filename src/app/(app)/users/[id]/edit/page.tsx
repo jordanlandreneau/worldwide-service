@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { Card, Page } from "@/components/ui";
 import { ResendInvite, UserForm } from "@/components/user-form";
-import { requireUser } from "@/lib/access";
+import { isServiceTeam, requireUser } from "@/lib/access";
 import { db, fetchAll } from "@/lib/data";
 import { resendInvite, saveUser } from "@/lib/users";
 
@@ -16,7 +16,7 @@ export default async function EditUser({ params, searchParams }: { params: Promi
   const { data: user } = await client.from("app_users").select("*").eq("id", id).maybeSingle();
   if (!user) notFound();
   const { data: links } = await client.from("user_dealerships").select("dealership_id").eq("user_id", id);
-  const [teams, stores] = await Promise.all([fetchAll<any>("teams", "id,name", "name"), fetchAll<any>("dealerships", "id,name", "name")]);
+  const [teams, stores] = await Promise.all([fetchAll<any>("teams", "id,name", "name").then((t) => t.filter((x) => isServiceTeam(x.name))), fetchAll<any>("dealerships", "id,name", "name")]);
   const roles = actor.role === "admin" || user.role === "admin" ? ["agent", "manager", "admin", "dealership"] : ["agent", "manager", "dealership"];
   return (
     <Page title={`${user.first_name} ${user.last_name}`.trim() || user.email} subtitle="Edit user">

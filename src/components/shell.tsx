@@ -8,7 +8,7 @@ import type { Role } from "@/lib/access";
 
 // Same sections, order, names and roles as 3.0. Dealer Sync stays out because it's a Lovable app.
 // Service site menu (carried over from Worldwide Service's Service section).
-const GROUPS: { label: string; items: { label: string; href: string; icon: typeof Info; min: Role }[] }[] = [
+const GROUPS: { label: string; items: { label: string; href: string; icon: typeof Info; min: Role; not?: Role }[] }[] = [
   { label: "Service", items: [
     { label: "Command Center", href: "/command", icon: Gauge, min: "dealership" },
     { label: "Reference Library", href: "/service/glossary", icon: Library, min: "agent" },
@@ -16,7 +16,7 @@ const GROUPS: { label: string; items: { label: string; href: string; icon: typeo
     { label: "Appointments", href: "/appointments", icon: CalendarClock, min: "dealership" },
     { label: "Appointment Report", href: "/reports/appointments", icon: BarChart3, min: "manager" },
     { label: "Codes", href: "/codes", icon: KeyRound, min: "agent" },
-    { label: "Request a change", href: "/requests", icon: MessageSquare, min: "dealership" },
+    { label: "Request a change", href: "/requests", icon: MessageSquare, min: "dealership", not: "agent" },
   ] },
   { label: "Admin", items: [
     { label: "Stores", href: "/stores", icon: Store, min: "admin" },
@@ -40,7 +40,7 @@ export function Shell({ user, children }: { user: { name: string; role: Role }; 
   const initials = user.name.split(/[\s.@]+/).slice(0, 2).map((s) => s[0]?.toUpperCase()).join("");
   // The whole site is laid out like the BMW Service & Scheduling Guide: dark top bar, no side rail.
   {
-    const links = GROUPS.flatMap((g) => g.items).filter((i) => RANK[user.role] >= RANK[i.min]);
+    const links = GROUPS.flatMap((g) => g.items).filter((i) => RANK[user.role] >= RANK[i.min] && i.not !== user.role);
     return (
       <div className="svc-app">
         <header className="svc-top">

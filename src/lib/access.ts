@@ -47,9 +47,11 @@ export const getUser = cache(async (): Promise<SessionUser | null> => {
   const bootstrap = (process.env.BOOTSTRAP_ADMIN_EMAILS ?? "").toLowerCase().split(",").map((s) => s.trim());
   const fallbackName = (data.user.user_metadata?.full_name as string | undefined) ?? email;
 
-  const { data: row } = await db().from("app_users").select("id,first_name,last_name,role,status,auth_user_id,last_sign_in_at").ilike("email", escapeLike(email)).maybeSingle();
+  const { data: row } = await db().from("app_users").select("id,first_name,last_name,role,status,team_name,auth_user_id,last_sign_in_at").ilike("email", escapeLike(email)).maybeSingle();
   if (row) {
     if (row.status === "disabled") return null;
+    // Agents and managers come from the HR hub's Service teams. Anyone else from 4.0 has no access here.
+    if ((row.role === "agent" || row.role === "manager") && !isServiceTeam(row.team_name as string | null) && !bootstrap.includes(email)) return null;
     const stale = !row.last_sign_in_at || Date.now() - new Date(row.last_sign_in_at as string).getTime() > 3_600_000;
     if (row.status === "invited" || row.auth_user_id !== data.user.id || stale) {
       await db().from("app_users").update({ status: "active", auth_user_id: data.user.id, last_sign_in_at: new Date().toISOString() }).eq("id", row.id);
@@ -69,5 +71,8 @@ export async function requireUser(min: Role = "agent"): Promise<SessionUser> {
   if (RANK[user.role] < RANK[min]) redirect("/service/info");
   return user;
 }
+
+// The Service department's work groups in the HR hub: Service Group 1-5 and Service Leadership.
+export const isServiceTeam = (name: string | null | undefined) => /^service\b/i.test(String(name ?? "").trim());
 
 export const atLeast = (role: Role, min: Role) => RANK[role] >= RANK[min];

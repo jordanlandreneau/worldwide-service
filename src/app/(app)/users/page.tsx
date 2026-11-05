@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Pager, query } from "@/components/report-bits";
 import { Card, Page, Status, Table } from "@/components/ui";
-import { requireUser } from "@/lib/access";
+import { isServiceTeam, requireUser } from "@/lib/access";
 import { fetchAll } from "@/lib/data";
 
 export const metadata = { title: "Users · Worldwide Service" };
@@ -16,11 +16,14 @@ export default async function Users({ searchParams }: { searchParams: Promise<Se
   const params = await searchParams;
   const { q = "", role = "", status = "", team = "", sort = "name" } = params;
   const page = Math.max(1, Number(params.page) || 1);
-  const [users, links, teams] = await Promise.all([
+  const [everyone, links, allTeams] = await Promise.all([
     fetchAll<any>("app_users", "id,first_name,last_name,email,role,status,team_id,team_name,last_sign_in_at,updated_at", "last_name"),
     fetchAll<any>("user_dealerships", "user_id", "user_id"),
     fetchAll<any>("teams", "id,name", "name"),
   ]);
+  // Only the HR hub's Service teams and store logins belong here.
+  const users = everyone.filter((u) => u.role === "dealership" || isServiceTeam(u.team_name));
+  const teams = allTeams.filter((t) => isServiceTeam(t.name));
   const stores = new Map<string, number>();
   for (const l of links) stores.set(l.user_id, (stores.get(l.user_id) ?? 0) + 1);
   const term = q.trim().toLowerCase();

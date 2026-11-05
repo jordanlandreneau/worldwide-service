@@ -5,6 +5,7 @@ import { db, fetchAll } from "@/lib/data";
 import { CATEGORIES } from "@/lib/request-categories";
 import { setRequestStatus, submitRequest } from "@/lib/requests";
 import { requireScoped } from "@/lib/scope";
+import { redirect } from "next/navigation";
 
 export const metadata = { title: "Request a change · Worldwide Service" };
 const STATUS: [string, string][] = [["open", "Open"], ["in_progress", "In progress"], ["done", "Done"], ["declined", "Declined"]];
@@ -12,6 +13,8 @@ const when = (v: string) => new Date(v).toLocaleString("en-US", { month: "short"
 
 export default async function Requests({ searchParams }: { searchParams: Promise<{ d?: string; status?: string }> }) {
   const { user, stores: scope } = await requireScoped();
+  // Managers, admins and store users only. Agents don't request changes.
+  if (user.role === "agent") redirect("/service/info");
   const handler = atLeast(user.role, "manager");
   const { d = "", status = "" } = await searchParams;
   const stores = (await fetchAll<any>("dealerships", "id,name,active", "name")).filter((s) => s.active !== false && (scope === null || scope.includes(s.id)));

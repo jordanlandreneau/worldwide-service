@@ -57,6 +57,8 @@ function parse(f: FormData): Parsed | string {
   if (role === "dealership" && !stores.length) return "Assign every store this person should see.";
   if (photo && !/^https:\/\//i.test(photo)) return "Photo URL must start with https://";
   if (status && !["invited", "active", "disabled"].includes(status)) return "Choose a status.";
+  // Agents and managers sign in only when they're on one of the HR hub's Service teams.
+  if ((role === "agent" || role === "manager") && !teamId) return "Choose the person's Service team.";
   return { first, last, email, role, teamId: role === "dealership" ? null : teamId, stores: role === "dealership" ? stores : [], photo, status };
 }
 
