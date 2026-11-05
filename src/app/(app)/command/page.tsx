@@ -5,7 +5,7 @@ import { ActionButton, Field, InlineForm, ModalForm } from "@/components/action-
 import { StorePicker } from "@/components/store-picker";
 import { Card, Table } from "@/components/ui";
 import { addStat, deleteCampaign, deleteList, deleteStat, saveCampaign, toggleWave, uploadList } from "@/lib/command";
-import { cachedAll, db } from "@/lib/data";
+import { db, fetchAll } from "@/lib/data";
 import { requireScoped } from "@/lib/scope";
 
 export const metadata = { title: "Command Center · Worldwide Service" };
@@ -59,7 +59,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
   const { user, stores: scope } = await requireScoped();
   const { d, tab: rawTab = "matrix", q = "", cat = "", status = "", from = "", to = "" } = await searchParams;
   const tab = TABS.some(([k]) => k === rawTab) ? rawTab : "matrix";
-  const stores = (await cachedAll("dealerships", "id,name,active", "name")).filter((s: any) => s.active !== false && (scope === null || scope.includes(s.id))) as { id: string; name: string }[];
+  const stores = (await fetchAll<any>("dealerships", "id,name,active", "name")).filter((s: any) => s.active !== false && (scope === null || scope.includes(s.id))) as { id: string; name: string }[];
   const store = stores.find((s) => s.id === d) ?? stores[0];
   const staff = user.role !== "dealership";
 

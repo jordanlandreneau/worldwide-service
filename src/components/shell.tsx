@@ -16,13 +16,14 @@ const GROUPS: { label: string; items: { label: string; href: string; icon: typeo
     { label: "Codes", href: "/codes", icon: KeyRound, min: "agent" },
   ] },
   { label: "Admin", items: [
+    { label: "Stores", href: "/stores", icon: Store, min: "admin" },
     { label: "Service Admin", href: "/service/manage", icon: SlidersHorizontal, min: "admin" },
     { label: "Users", href: "/users", icon: UserCog, min: "manager" },
   ] },
 ];
 // Every page has its own color, so it's easy to tell where you are.
 const TONES: Record<string, string> = {
-  "/command": "green", "/service/info": "indigo", "/service/glossary": "green", "/codes": "violet", "/users": "pink",
+  "/command": "green", "/service/info": "indigo", "/service/glossary": "green", "/codes": "violet", "/users": "pink", "/stores": "cyan",
   "/service/manage": "amber",
 };
 const RANK: Record<Role, number> = { dealership: 0, agent: 1, manager: 2, admin: 3 };

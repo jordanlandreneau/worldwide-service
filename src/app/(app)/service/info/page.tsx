@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
 import { clock, HoursGrid } from "@/components/hours-grid";
+import Link from "next/link";
+import { LiveClock } from "@/components/live-clock";
+import { ServiceLogins } from "@/components/service-logins";
 import { StorePicker } from "@/components/store-picker";
-import { Card, External, Page, Table } from "@/components/ui";
-import { CredentialsPanel } from "@/components/credentials-panel";
+import { External } from "@/components/ui";
 import { requireScoped } from "@/lib/scope";
-import { CREDENTIAL_COLUMNS, type Credential, db } from "@/lib/data";
+import { CREDENTIAL_COLUMNS, type Credential, db, fetchAll } from "@/lib/data";
 
 export const metadata = { title: "Service Data · Worldwide Service" };
 
@@ -31,7 +33,29 @@ function Answer({ k, value }: { k: string; value: unknown }) {
   const yes = m[1].toLowerCase() === "yes";
   return <><span className="x-answer" data-yes={yes}>{yes ? "Yes" : "No"}</span>{m[2] && <span className="x-prewrap"> {m[2]}</span>}</>;
 }
-const Facts = ({ items }: { items: [string, ReactNode][] }) => <dl className="x-facts">{items.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>;
+const Facts = ({ items }: { items: [string, ReactNode][] }) => <dl className="svc-facts">{items.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>;
+const slug = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+function Section({ id, title, alert, children }: { id: string; title: string; alert?: boolean; children: ReactNode }) {
+  return (
+    <section id={id} className={`svc-section${alert ? " alert" : ""}`}>
+      <div className="svc-section-head"><h2>{title}</h2></div>
+      <div className="svc-section-body">{children}</div>
+    </section>
+  );
+}
+
+function Grid({ head, rows, empty }: { head: string[]; rows: ReactNode[][]; empty: string }) {
+  if (!rows.length) return <p className="svc-empty">{empty}</p>;
+  return (
+    <div className="svc-table-wrap">
+      <table className="svc-table">
+        <thead><tr>{head.map((h) => <th key={h} scope="col">{h}</th>)}</tr></thead>
+        <tbody>{rows.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j}>{c}</td>)}</tr>)}</tbody>
+      </table>
+    </div>
+  );
+}
 
 export default async function ServiceData({ searchParams }: { searchParams: Promise<{ d?: string }> }) {
   // Dealership logins only see their own stores.
@@ -39,65 +63,100 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
   const staff = user.role !== "dealership";
   const { d } = await searchParams;
   const client = db();
-  // The Service department's CRM logins (from Store Info) are shown here too, so a store's
-  // Service details live in one place. Stores with a Service login but no Service Data still appear.
-  const { data: dept } = await client.from("departments").select("id").ilike("name", "service").maybeSingle();
-  const serviceDept = (dept?.id as string | undefined) ?? null;
-  const [{ data: rows }, { data: loginStores }] = await Promise.all([
-    client.from("service_profiles").select("dealership_id,data->dealership->>name"),
-    staff && serviceDept ? client.from("crm_credentials").select("dealership_id,dealerships(name)").eq("department_id", serviceDept) : Promise.resolve({ data: [] as any[] }),
+  const [all, { data: dept }] = await Promise.all([
+    fetchAll<any>("dealerships", "id,name,active", "name"),
+    client.from("departments").select("id").ilike("name", "service").maybeSingle(),
   ]);
-  const byId = new Map<string, string>();
-  for (const r of (rows ?? []) as any[]) byId.set(r.dealership_id, r.name ?? "");
-  for (const r of (loginStores ?? []) as any[]) if (!byId.has(r.dealership_id)) byId.set(r.dealership_id, r.dealerships?.name ?? "");
-  const stores = [...byId].filter(([sid]) => scope === null || scope.includes(sid)).map(([sid, name]) => ({ id: sid, name })).sort((a, b) => a.name.localeCompare(b.name));
+  const serviceDept = (dept?.id as string | undefined) ?? null;
+  const stores = all.filter((s: any) => s.active !== false && (scope === null || scope.includes(s.id))).map((s: any) => ({ id: s.id as string, name: s.name as string }));
   const id = d && stores.some((s) => s.id === d) ? d : stores[0]?.id;
-  const [{ data: row }, { data: store }, { data: creds }] = id
-    ? await Promise.all([
-        client.from("service_profiles").select("data").eq("dealership_id", id).maybeSingle(),
-        client.from("dealerships").select("name,address,logo_url,timezone").eq("id", id).maybeSingle(),
-        staff && serviceDept ? client.from("crm_credentials").select(CREDENTIAL_COLUMNS).eq("dealership_id", id).eq("department_id", serviceDept) : Promise.resolve({ data: [] as any[] }),
-      ])
-    : [{ data: null }, { data: null }, { data: [] as any[] }];
-  const serviceLogins = (creds ?? []) as Credential[];
-  const logins = staff && serviceLogins.length > 0 && serviceDept ? (
-    <Card title="Service CRM logins" note="The Service department's CRM logins for this store.">
-      <CredentialsPanel context="service" rules={[]} credentials={serviceLogins} deptName={{ [serviceDept]: "Service" }} />
-    </Card>
-  ) : null;
-  const b = row?.data as any;
-  const g: Record<string, unknown> = b?.generalInfo ?? {};
+  if (!id) return <div className="x-page"><p className="text-sm text-ink-muted">No stores are assigned to your login yet.</p></div>;
+
+  const [{ data: row }, { data: store }, { data: creds }] = await Promise.all([
+    client.from("service_profiles").select("data").eq("dealership_id", id).maybeSingle(),
+    client.from("dealerships").select("name,address,phone,website,logo_url,timezone,special_note,agent_code_number").eq("id", id).maybeSingle(),
+    // The Service department's CRM logins live here, so a store's Service details are in one place.
+    staff && serviceDept ? client.from("crm_credentials").select(CREDENTIAL_COLUMNS).eq("dealership_id", id).eq("department_id", serviceDept) : Promise.resolve({ data: [] as any[] }),
+  ]);
+  const b = (row?.data ?? {}) as any;
+  const g: Record<string, unknown> = b.generalInfo ?? {};
   const has = (k: string) => !SKIP.has(k) && g[k] !== null && g[k] !== undefined && g[k] !== "";
   const placed = new Set(SECTIONS.flatMap(([, keys]) => keys));
   const other = Object.keys(g).filter((k) => has(k) && !placed.has(k));
-  const groups: [string, string[]][] = [...SECTIONS.map(([t, keys]) => [t, keys.filter(has)] as [string, string[]]), ["Other", other]];
-  const notes = [...new Map([...(b?.announcements ?? []), ...(b?.limitations ?? [])].filter((n: any) => n.active !== false).map((n: any) => [String(n.text).trim().toUpperCase(), n])).values()] as any[];
-  const hours = (b?.hours ?? []).map((h: any) => ({ department: h.departmentName, day: h.dayOfWeek, closed: h.closed, open: h.openTime, close: h.closeTime }));
+  const groups: [string, string[]][] = [...SECTIONS.map(([t, keys]) => [t, keys.filter(has)] as [string, string[]]), ["Other", other]].filter(([, keys]) => keys.length) as [string, string[]][];
+  const notes = [...new Map([...(b.announcements ?? []), ...(b.limitations ?? [])].filter((n: any) => n.active !== false).map((n: any) => [String(n.text).trim().toUpperCase(), n])).values()] as any[];
+  const hours = (b.hours ?? []).map((h: any) => ({ department: h.departmentName, day: h.dayOfWeek, closed: h.closed, open: h.openTime, close: h.closeTime }));
+  const logins = (creds ?? []) as Credential[];
+  const name = (store?.name as string | undefined) ?? b.dealership?.name ?? "Service Data";
+  const address = (store?.address as string | undefined) ?? b.dealership?.address ?? null;
+  const tz = (store?.timezone as string | undefined) ?? b.dealership?.timezone ?? null;
   const logo = /^https:\/\//i.test(String(store?.logo_url ?? "")) ? (store!.logo_url as string) : null;
+  const empty = !groups.length && !notes.length && !hours.length && !(b.pricing ?? []).length && !(b.contacts ?? []).length;
+
+  const nav: { id: string; label: string; alert?: boolean }[] = [
+    ...(notes.length || store?.special_note ? [{ id: "important", label: "Important", alert: true }] : []),
+    ...(logins.length ? [{ id: "logins", label: "Logins" }] : []),
+    { id: "hours", label: "Hours" },
+    ...groups.map(([t]) => ({ id: slug(t), label: t })),
+    { id: "pricing", label: "Pricing" },
+    { id: "contacts", label: "Directory" },
+  ];
+
   return (
-    <Page title="Service Data" subtitle={b?.dealership ? `${b.dealership.name} · ${b.dealership.address ?? ""}` : store ? `${store.name}${store.address ? ` · ${store.address}` : ""}` : undefined} actions={<StorePicker base="/service/info" stores={stores} selected={b?.dealership?.name ?? (store?.name as string | undefined)} />}>
-      {!b ? (store ? <>{logins}<Card><p className="text-sm text-ink-muted">No Service Data has been entered for this store yet. Admins can add it in Service Admin.</p></Card></> : <p className="text-sm text-ink-muted">Select a dealership.</p>) : (
-        <>
-          {logo && <div className="x-logo-box">{/* eslint-disable-next-line @next/next/no-img-element */}<img src={logo} alt={`${b.dealership?.name ?? "Store"} logo`} referrerPolicy="no-referrer" /></div>}
-          {notes.length > 0 && (
-            <section className="x-callout" aria-label="Announcements and limitations">
-              <h2>Announcements and limitations</h2>
-              <ul>{notes.map((n: any) => <li key={n.id} className="x-prewrap">{n.text}</li>)}</ul>
-            </section>
-          )}
-          {logins}
-          <Card title="Store hours" note="Times are the store's local time."><HoursGrid rows={hours} timeZone={store?.timezone as string | null} /></Card>
-          <div className="x-board-grid">
-            {groups.filter(([, keys]) => keys.length).map(([title, keys]) => <Card key={title} title={title}><Facts items={keys.map((k) => [label(k), <Answer key={k} k={k} value={g[k]} />])} /></Card>)}
+    <div className="svc">
+      <section className="svc-hero">
+        <div className="svc-hero-inner">
+          <div className="svc-hero-text">
+            {logo && /* eslint-disable-next-line @next/next/no-img-element */ <img className="svc-hero-logo" src={logo} alt="" referrerPolicy="no-referrer" />}
+            <p className="svc-eyebrow">Service &amp; Scheduling Guide</p>
+            <h1 className="svc-hero-title">{name}</h1>
+            {address && <p className="svc-hero-sub">{address}{store?.phone ? ` · ${store.phone}` : ""}</p>}
           </div>
-          <Card title="Pricing">
-            <Table head={["Service", "Price", "Comments"]} rows={(b.pricing ?? []).map((p: any) => [p.service, p.price === null ? "—" : `$${p.price}`, p.comments ?? "—"])} empty="No pricing." />
-          </Card>
-          <Card title="Contacts">
-            <Table head={["Name", "Title", "Phone", "Email", "Comments"]} rows={(b.contacts ?? []).map((c: any) => [c.name ?? "—", c.title ?? "—", c.phone ?? "—", c.email ?? "—", c.comments ?? "—"])} empty="No contacts." />
-          </Card>
-        </>
-      )}
-    </Page>
+          <LiveClock timeZone={tz} />
+        </div>
+        <div className="svc-hero-bar">
+          <nav className="svc-tabs" aria-label="Pages">
+            <Link href={`/service/info?d=${id}`} className="active" aria-current="page">Main</Link>
+            <Link href={`/command?d=${id}&tab=analytics`}>Analytics</Link>
+            {staff && <Link href={`/command?d=${id}`}>Command Center</Link>}
+          </nav>
+          {stores.length > 1 && <div className="svc-picker"><StorePicker base="/service/info" stores={stores} selected={name} /></div>}
+        </div>
+      </section>
+
+      <div className="svc-layout">
+        <aside className="svc-sidebar">
+          <nav className="svc-nav" aria-label="Sections">
+            {nav.map((n) => <a key={n.id} href={`#${n.id}`} className={n.alert ? "alert" : undefined}>{n.label}</a>)}
+          </nav>
+          {user.role === "admin" && <Link className="svc-edit-link" href={`/service/manage?d=${id}&tab=general`}>Edit Service Data</Link>}
+        </aside>
+
+        <div className="svc-content">
+          {empty && <section className="svc-section"><div className="svc-section-body"><p className="svc-empty">No Service Data has been entered for this store yet.{user.role === "admin" ? " Use Edit Service Data to add it." : ""}</p></div></section>}
+          {(notes.length > 0 || store?.special_note) && (
+            <Section id="important" title="Important" alert>
+              <ul>{notes.map((n: any) => <li key={n.id} className="x-prewrap">{n.text}</li>)}{store?.special_note && <li className="x-prewrap">{store.special_note}</li>}</ul>
+            </Section>
+          )}
+          {logins.length > 0 && <Section id="logins" title="Logins"><ServiceLogins credentials={logins} /></Section>}
+          <Section id="hours" title="Hours">
+            <HoursGrid rows={hours} timeZone={tz} />
+            <p className="svc-note">Times are the store&apos;s local time.</p>
+          </Section>
+          {groups.map(([title, keys]) => (
+            <Section key={title} id={slug(title)} title={title}>
+              <Facts items={keys.map((k) => [label(k), <Answer key={k} k={k} value={g[k]} />])} />
+            </Section>
+          ))}
+          <Section id="pricing" title="Pricing">
+            <Grid head={["Service", "Price", "Comments"]} rows={(b.pricing ?? []).map((p: any) => [p.service, p.price === null || p.price === undefined ? "—" : `$${p.price}`, p.comments ?? "—"])} empty="No pricing yet." />
+          </Section>
+          <Section id="contacts" title="Directory">
+            <Grid head={["Name", "Title", "Phone", "Email", "Comments"]} rows={(b.contacts ?? []).map((c: any) => [c.name ?? "—", c.title ?? "—", c.phone ?? "—", c.email ? <a key="e" href={`mailto:${c.email}`}>{c.email}</a> : "—", c.comments ?? "—"])} empty="No contacts yet." />
+          </Section>
+        </div>
+      </div>
+    </div>
   );
 }
