@@ -13,6 +13,7 @@ const GROUPS: { label: string; items: { label: string; href: string; icon: typeo
     { label: "Command Center", href: "/command", icon: Gauge, min: "dealership" },
     { label: "Reference Library", href: "/service/glossary", icon: Library, min: "agent" },
     { label: "Service Data", href: "/service/info", icon: CircleHelp, min: "dealership" },
+    { label: "Appointments", href: "/appointments", icon: CalendarClock, min: "dealership" },
     { label: "Codes", href: "/codes", icon: KeyRound, min: "agent" },
   ] },
   { label: "Admin", items: [

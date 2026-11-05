@@ -73,6 +73,10 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
     client.from("campaign_stats").select("id,campaign_id,stat_date,calls_made,appointments_set,notes,entered_by").eq("dealership_id", store.id).order("stat_date", { ascending: false }).order("created_at", { ascending: false }).limit(2000),
     client.from("outbound_lists").select("id,campaign_id,file_name,row_count,note,uploaded_by,uploaded_at").eq("dealership_id", store.id).order("uploaded_at", { ascending: false }).limit(200),
   ]);
+  let booked = client.from("appointments").select("id", { count: "exact", head: true }).eq("dealership_id", store.id).neq("status", "cancelled");
+  if (/^\d{4}-\d{2}-\d{2}$/.test(from)) booked = booked.gte("created_at", `${from}T00:00:00-05:00`);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(to)) booked = booked.lte("created_at", `${to}T23:59:59-05:00`);
+  const { count: bookedCount } = tab === "analytics" ? await booked : { count: 0 };
   const campaigns = (c1 ?? []) as Campaign[];
   const stats = (s1 ?? []) as Stat[];
   const lists = (l1 ?? []) as List[];
@@ -192,6 +196,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
           <StatCard label="Outbound calls" icon={<PhoneCall size={18} aria-hidden />} value={calls} note={from || to ? "In the chosen dates" : "All time"} tone="slate" bar={100} />
           <StatCard label="Appointments set" icon={<CalendarDays size={18} aria-hidden />} value={appts} note={`${pct(appts, calls)}% of calls set an appointment`} tone="green" bar={pct(appts, calls)} />
           <StatCard label="Last 7 days" icon={<Clock size={18} aria-hidden />} value={recent.reduce((a, s) => a + s.calls_made, 0)} note={`${recent.reduce((a, s) => a + s.appointments_set, 0)} appointments set`} tone="blue" bar={100} />
+          <StatCard label="Booked on the site" icon={<CalendarDays size={18} aria-hidden />} value={bookedCount ?? 0} note="From the Appointments page (not cancelled)" tone="amber" bar={100} />
           <StatCard label="Campaigns finished" icon={<ShieldCheck size={18} aria-hidden />} value={both} of={total} note={`${pct(both, total)}% have both waves done`} tone="violet" bar={pct(both, total)} />
         </div>
         <Card title="By campaign" note="Calls and appointments come from the Analytics Breakdown entries.">

@@ -1,5 +1,5 @@
 // Content 3.0 only loads when a section is opened, so the page copies didn't include it.
-const RAW: Record<string, string> = {
+export const DICTIONARY: Record<string, string> = {
   A: "Aceite|Oil;Aceite de motor|Motor oil;Aceite multigrado|Multigrade oil;Acelerador|Accelerator;Agua|Water;Aire acondicionado|Air conditioning;Alternador|Alternator;Amortiguador|Shock absorber;Antena|Aerial (GB), Antenna (US);Arranque|Ignition;Asiento del acompañante|Passenger seat;Asiento delantero|Front seat;Asiento para niños|Child seat;Asiento trasero|Back seat;Automático|Automatic",
   B: "Baca del coche|Roof rack;Barra de remolque|Tow bar;Barra de tracción|Drawbar;Batería|Battery;Bocina|Horn;Bomba de aceite|Oil pump;Bomba de agua|Water pump;Bomba de aire|Air pump;Bujía|Spark plug;Bujía de encendido|Ignition spark plug;Bujías|Spark plugs",
   C: "Cable del acelerador|Throttle cable;Caja de cambios|Gear box;Caja de fusibles|Fuse box;Calefacción|Heater;Capó|Bonnet (GB), Hood (US);Capota|Bonnet;Carburador|Carburetor;Carrocería|Bodywork;Cerradura|Lock;Cerradura del maletero|Trunk lock;Cerradura eléctrica|Electric door lock;Cierre centralizado|Central locking;Cinturón de seguridad|Seatbelt;Contador de kilómetros|Odometer (US);Correa|Belt;Cubierta del motor|Engine cover",
@@ -18,9 +18,9 @@ const RAW: Record<string, string> = {
   V: "Válvula|Valve;Varilla|Push rod;Velocímetro|Speedometer;Ventana|Window;Ventanilla|Door window;Ventilación|Air vent;Ventilador|Fan;Volante|Steering wheel",
   Z: "Zapatas de freno|Brake shoes",
 };
-const terms = (letter: string) => RAW[letter].split(";").map((t) => t.split("|")).map(([es, en]) => `<article class="x-term" data-term><strong>${es}</strong><span>${en}</span></article>`).join("");
+const terms = (letter: string) => DICTIONARY[letter].split(";").map((t) => t.split("|")).map(([es, en]) => `<article class="x-term" data-term><strong>${es}</strong><span>${en}</span></article>`).join("");
 
 // Adds the missing content, closed, right after each section's button.
 export function withExtras(html: string) {
-  return html.replace(/(<div id="dictionary-letter-(.)"[^>]*>[\s\S]*?<\/button>)/g, (m, head, letter) => (RAW[letter] ? `${head}<div class="x-term-grid" data-panel hidden>${terms(letter)}</div>` : m));
+  return html.replace(/(<div id="dictionary-letter-(.)"[^>]*>[\s\S]*?<\/button>)/g, (m, head, letter) => (DICTIONARY[letter] ? `${head}<div class="x-term-grid" data-panel hidden>${terms(letter)}</div>` : m));
 }

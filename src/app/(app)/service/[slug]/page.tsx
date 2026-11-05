@@ -1,29 +1,37 @@
 import { notFound } from "next/navigation";
+import { ReferenceImport } from "@/components/reference-import";
+import { ReferenceLibrary, type Term } from "@/components/reference-library";
 import { ServiceHtml } from "@/components/service-html";
 import { Page } from "@/components/ui";
-import { requireUser } from "@/lib/access";
-import { db } from "@/lib/data";
+import { atLeast, requireUser } from "@/lib/access";
+import { db, fetchAll } from "@/lib/data";
 
 // Only the Reference Library is kept from the pages captured from 3.0.
 const SLUGS = new Set(["glossary"]);
 export const metadata = { title: "Reference Library · Worldwide Service" };
 
-export default async function ServicePage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Record<string, string>> }) {
-  await requireUser();
+export default async function ServicePage({ params }: { params: Promise<{ slug: string }> }) {
+  const user = await requireUser();
   const { slug } = await params;
   if (!SLUGS.has(slug)) notFound();
-  const { section, resource } = await searchParams;
-  const base = `/service/${slug}`;
-  const query = section ? `?section=${section}` : resource ? `?resource=${resource}` : "";
-  const client = db();
-  let { data } = await client.from("service_pages").select("title,html,tabs").eq("path", `${base}${query}`).maybeSingle();
-  if (!data && query) notFound();
-  if (!data) ({ data } = await client.from("service_pages").select("title,html,tabs").eq("path", base).maybeSingle());
+  const terms = await fetchAll<Term>("reference_terms", "id,kind,term,meaning", "term");
+  const head = { title: "Reference Library", subtitle: "Searchable automotive glossary and Spanish ↔ English dictionary" };
+  if (terms.length) {
+    return (
+      <Page {...head}>
+        <section className="x-card"><ReferenceLibrary terms={terms} canEdit={atLeast(user.role, "manager")} /></section>
+      </Page>
+    );
+  }
+  // Until it's made editable, show the page as captured from 4.0.
+  const { data } = await db().from("service_pages").select("html,tabs").eq("path", `/service/${slug}`).maybeSingle();
   if (!data) notFound();
+  const tabs = data.tabs as { label: string; html: string }[] | null;
   return (
-    <Page title="Reference Library" subtitle="Searchable automotive glossary and Spanish ↔ English dictionary">
+    <Page {...head}>
+      {user.role === "admin" && <section className="x-card"><ReferenceImport html={tabs?.[0]?.html ?? (data.html as string)} /></section>}
       <section className="x-card svc-captured">
-        <ServiceHtml key={`${base}${query}`} html={data.html as string} tabs={data.tabs as { label: string; html: string }[] | null} />
+        <ServiceHtml html={data.html as string} tabs={tabs} />
       </section>
     </Page>
   );
