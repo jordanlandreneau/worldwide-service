@@ -2,7 +2,8 @@ import { Field, InlineForm } from "@/components/action-form";
 import { Card, Page, Table } from "@/components/ui";
 import { atLeast } from "@/lib/access";
 import { db, fetchAll } from "@/lib/data";
-import { CATEGORIES, setRequestStatus, submitRequest } from "@/lib/requests";
+import { CATEGORIES } from "@/lib/request-categories";
+import { setRequestStatus, submitRequest } from "@/lib/requests";
 import { requireScoped } from "@/lib/scope";
 
 export const metadata = { title: "Request a change · Worldwide Service" };

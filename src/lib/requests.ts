@@ -4,10 +4,10 @@ import { atLeast } from "@/lib/access";
 import { db } from "@/lib/data";
 import { escapeHtml as esc, sendMail } from "@/lib/mail";
 import type { Result } from "@/lib/manage";
+import { CATEGORIES } from "@/lib/request-categories";
 import { requireScoped } from "@/lib/scope";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export const CATEGORIES = ["Service Data", "Hours", "Contacts", "Pricing", "Logins", "Campaigns", "Reference Library", "Something else"];
 const STATUSES = ["open", "in_progress", "done", "declined"];
 // Who gets the email. CHANGE_REQUEST_EMAILS in Vercel (comma separated) overrides this list.
 const RECIPIENTS = () => (process.env.CHANGE_REQUEST_EMAILS ?? "lauren@worldwidebdc.com,leanetm@worldwidebdc.com").split(",").map((s) => s.trim()).filter(Boolean);
