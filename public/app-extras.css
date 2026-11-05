@@ -569,3 +569,21 @@ span.cc-wave { cursor: default; }
 .svc-secret { color: #fff; user-select: text; -webkit-user-select: text; cursor: text; overflow-wrap: anywhere; flex: 1; min-width: 80px; font-variant-numeric: tabular-nums; }
 .svc-icon-btn { display: inline-flex; align-items: center; gap: 5px; font: 500 12px var(--font-bmw, inherit); color: #aeb7c4; background: none; border: 1px solid rgba(255,255,255,.2); border-radius: var(--radius); padding: 4px 9px; cursor: pointer; }
 .svc-icon-btn:hover { color: #fff; border-color: #fff; }
+
+/* Reference Library: captured 4.0 content inside the guide's page frame */
+.svc-captured .x-captured > div:first-child { display: none; }
+.svc-captured .x-captured > div { max-width: none !important; padding: 0 !important; margin: 0 !important; }
+.svc-captured .x-captured, .svc-captured .x-captured * { font-family: var(--font-bmw); }
+.svc-captured .x-captured [class*="rounded"] { border-radius: var(--radius) !important; }
+.svc-captured .x-captured input { border-color: var(--line-strong); height: 42px; font-size: 15px; }
+.svc-captured .x-captured input:focus { border-color: var(--portimao); outline: 2px solid var(--portimao-tint); }
+.svc-captured .x-captured [role="tab"], .svc-captured .x-captured .border-b > button { color: var(--ink-2); font-weight: 500; }
+.svc-captured .x-captured .bg-accent-tick { background: var(--portimao) !important; }
+.svc-captured .x-captured nav.sticky { top: 72px !important; background: var(--mineral); border-color: var(--line); }
+.svc-captured .x-captured nav.sticky a, .svc-captured .x-captured nav.sticky button { border-radius: var(--radius); }
+.svc-captured .x-captured nav.sticky a:hover, .svc-captured .x-captured nav.sticky button:hover { background: var(--portimao-tint); color: var(--portimao); }
+.svc-captured .x-captured section { scroll-margin-top: 140px; }
+.svc-captured .x-captured h3 { font-stretch: var(--wide); font-weight: 400; font-size: 20px; color: var(--ink); }
+.svc-captured .x-captured details > summary { font-weight: 500; color: var(--ink); }
+.svc-captured .x-captured details[open] > summary { color: var(--portimao); }
+.svc-captured .x-captured .x-term strong { color: var(--ink); }
