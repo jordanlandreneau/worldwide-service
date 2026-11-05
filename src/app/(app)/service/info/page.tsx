@@ -52,18 +52,17 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
   for (const r of (loginStores ?? []) as any[]) if (!byId.has(r.dealership_id)) byId.set(r.dealership_id, r.dealerships?.name ?? "");
   const stores = [...byId].filter(([sid]) => scope === null || scope.includes(sid)).map(([sid, name]) => ({ id: sid, name })).sort((a, b) => a.name.localeCompare(b.name));
   const id = d && stores.some((s) => s.id === d) ? d : stores[0]?.id;
-  const [{ data: row }, { data: store }, { data: creds }, { data: rules }] = id
+  const [{ data: row }, { data: store }, { data: creds }] = id
     ? await Promise.all([
         client.from("service_profiles").select("data").eq("dealership_id", id).maybeSingle(),
         client.from("dealerships").select("name,address,logo_url,timezone").eq("id", id).maybeSingle(),
         staff && serviceDept ? client.from("crm_credentials").select(CREDENTIAL_COLUMNS).eq("dealership_id", id).eq("department_id", serviceDept) : Promise.resolve({ data: [] as any[] }),
-        staff ? client.from("store_rules").select("id,note").eq("dealership_id", id).order("created_at") : Promise.resolve({ data: [] as any[] }),
       ])
-    : [{ data: null }, { data: null }, { data: [] as any[] }, { data: [] as any[] }];
+    : [{ data: null }, { data: null }, { data: [] as any[] }];
   const serviceLogins = (creds ?? []) as Credential[];
   const logins = staff && serviceLogins.length > 0 && serviceDept ? (
-    <Card title="Service CRM logins" note="The Service department's logins from Store Info. Acknowledge each store rule before revealing passwords.">
-      <CredentialsPanel context="info" rules={(rules ?? []) as { id: string; note: string }[]} credentials={serviceLogins} deptName={{ [serviceDept]: "Service" }} />
+    <Card title="Service CRM logins" note="The Service department's CRM logins for this store.">
+      <CredentialsPanel context="service" rules={[]} credentials={serviceLogins} deptName={{ [serviceDept]: "Service" }} />
     </Card>
   ) : null;
   const b = row?.data as any;

@@ -11,7 +11,7 @@ const copy = (text: string) => navigator.clipboard?.writeText(text);
 // Checkbox state lives only in this component, so it resets on reload just like 3.0.
 // The server checks the same list again before returning any password.
 export function CredentialsPanel({ context, rules, credentials, deptName }: {
-  context: "info" | "manage";
+  context: "info" | "manage" | "service";
   rules: Rule[];
   credentials: Credential[];
   deptName: Record<string, string>;
@@ -20,7 +20,7 @@ export function CredentialsPanel({ context, rules, credentials, deptName }: {
   const [shown, setShown] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const done = rules.filter((r) => checked[r.id]).length;
-  const unlocked = context === "manage" || done === rules.length;
+  const unlocked = context !== "info" || done === rules.length;
   const lockedTitle = "Acknowledge store rules to reveal";
 
   async function get(id: string) {

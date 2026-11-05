@@ -289,7 +289,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
         </div>
         <div className="cc-head-actions">
           {stores.length > 1 && <StorePicker base="/command" stores={stores} selected={store.name} />}
-          {staff && <Link className="x-btn" href={`/store-info?d=${store.id}`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><KeyRound size={15} aria-hidden /> BDC Logins</Link>}
+          {staff && <Link className="x-btn" href={`/service/info?d=${store.id}`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><KeyRound size={15} aria-hidden /> BDC Logins</Link>}
           {staff && <span className="cc-primary"><ModalForm button="+ New Campaign Task" title="New campaign task" submit="Add" action={saveCampaign.bind(null, store.id, null)}><CampaignFields categories={categories} /></ModalForm></span>}
           {!staff && <Link className="x-btn" href={`/command?${new URLSearchParams({ d: store.id, tab: "lists" })}`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Upload size={15} aria-hidden /> Upload a list</Link>}
         </div>

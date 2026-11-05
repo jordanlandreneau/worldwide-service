@@ -5,9 +5,10 @@ import { decryptCrmPassword as decrypt } from "@/lib/crm-decrypt";
 
 // context "info": Dealership Info, every store rule must be acknowledged.
 // context "manage": the dealership record page, managers and admins only, as on 3.0.
+// context "service": the Service Data page. No store-rule step there.
 export async function revealPassword(
   credentialId: string,
-  context: "info" | "manage",
+  context: "info" | "manage" | "service",
   acknowledged: string[],
 ): Promise<{ password?: string; error?: string }> {
   const user = await requireUser();
@@ -15,10 +16,14 @@ export async function revealPassword(
   const client = db();
   const { data: cred } = await client
     .from("crm_credentials")
-    .select("id,dealership_id,password_ciphertext")
+    .select("id,dealership_id,department_id,password_ciphertext")
     .eq("id", credentialId)
     .maybeSingle();
   if (!cred?.password_ciphertext) return { error: "No password is stored for this login." };
+  if (context === "service") {
+    const { data: dept } = await client.from("departments").select("name").eq("id", cred.department_id ?? "00000000-0000-0000-0000-000000000000").maybeSingle();
+    if (String(dept?.name ?? "").toLowerCase() !== "service") return { error: "You don't have access to this." };
+  }
 
   const { data: rules } = await client.from("store_rules").select("id").eq("dealership_id", cred.dealership_id);
   const required = (rules ?? []).map((r) => r.id as string);

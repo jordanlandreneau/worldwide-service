@@ -13,7 +13,6 @@ const GROUPS: { label: string; items: { label: string; href: string; icon: typeo
     { label: "Command Center", href: "/command", icon: Gauge, min: "dealership" },
     { label: "Reference Library", href: "/service/glossary", icon: Library, min: "agent" },
     { label: "Service Data", href: "/service/info", icon: CircleHelp, min: "dealership" },
-    { label: "Store Info", href: "/store-info", icon: Store, min: "agent" },
     { label: "Codes", href: "/codes", icon: KeyRound, min: "agent" },
   ] },
   { label: "Admin", items: [
@@ -23,7 +22,7 @@ const GROUPS: { label: string; items: { label: string; href: string; icon: typeo
 ];
 // Every page has its own color, so it's easy to tell where you are.
 const TONES: Record<string, string> = {
-  "/command": "green", "/service/info": "indigo", "/service/glossary": "green", "/store-info": "cyan", "/codes": "violet", "/users": "pink",
+  "/command": "green", "/service/info": "indigo", "/service/glossary": "green", "/codes": "violet", "/users": "pink",
   "/service/manage": "amber",
 };
 const RANK: Record<Role, number> = { dealership: 0, agent: 1, manager: 2, admin: 3 };
