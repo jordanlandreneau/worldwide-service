@@ -11,10 +11,10 @@ export const metadata = { title: "Appointments · Worldwide Service" };
 const STATUS: [string, string][] = [["set", "Set"], ["showed", "Showed"], ["no_show", "No show"], ["cancelled", "Cancelled"], ["rescheduled", "Rescheduled"]];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-export default async function Appointments({ searchParams }: { searchParams: Promise<{ d?: string; from?: string; to?: string; status?: string; added?: string }> }) {
+export default async function Appointments({ searchParams }: { searchParams: Promise<{ d?: string; from?: string; to?: string; status?: string; added?: string; campaign?: string }> }) {
   const { user, stores: scope } = await requireScoped();
   const staff = user.role !== "dealership";
-  const { d = "", from = "", to = "", status = "", added } = await searchParams;
+  const { d = "", from = "", to = "", status = "", added, campaign = "" } = await searchParams;
   const stores = (await fetchAll<any>("dealerships", "id,name,active,timezone", "name")).filter((s) => s.active !== false && (scope === null || scope.includes(s.id)));
   const store = stores.find((s) => s.id === d) ?? (stores.length === 1 ? stores[0] : undefined);
   const names = new Map(stores.map((s) => [s.id as string, s]));
@@ -40,7 +40,7 @@ export default async function Appointments({ searchParams }: { searchParams: Pro
     <Page title="Appointments" subtitle={store ? `${store.name}` : staff ? "Every Service store" : "Your stores"} actions={stores.length > 1 ? <StorePicker base="/appointments" stores={stores} selected={store?.name} /> : undefined}>
       {added && <Card><p role="status" className="text-sm">Appointment saved. No text is sent; the store&apos;s CRM confirms it with the customer.</p></Card>}
       {staff && (
-        <Card title="Set an appointment" note={store ? `Times are ${store.name}'s local time.` : "Choose the store first (top right)."}>
+        <div id="set" /><Card title="Set an appointment" note={store ? `Times are ${store.name}'s local time.` : "Choose the store first (top right)."}>
           {store ? (
             <InlineForm action={saveAppointment.bind(null, store.id)} submit="Save appointment">
               <div className="cc-form-grid">
@@ -52,7 +52,7 @@ export default async function Appointments({ searchParams }: { searchParams: Pro
                 <Field label="Date"><input className="x-input" type="date" name="date" required defaultValue={today} /></Field>
                 <Field label="Time"><input className="x-input" type="time" name="time" required step={300} /></Field>
                 <Field label="Campaign (optional)">
-                  <select className="x-input" name="campaign_id" defaultValue=""><option value="">None</option>{((camps ?? []) as any[]).map((c) => <option key={c.id} value={c.id}>{c.category} · {c.name}</option>)}</select>
+                  <select className="x-input" name="campaign_id" defaultValue={((camps ?? []) as any[]).some((c) => c.id === campaign) ? campaign : ""}><option value="">None</option>{((camps ?? []) as any[]).map((c) => <option key={c.id} value={c.id}>{c.category} · {c.name}</option>)}</select>
                 </Field>
               </div>
               <Field label="Notes (optional)"><input className="x-input" name="notes" placeholder="Vehicle, service needed, advisor…" /></Field>

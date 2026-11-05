@@ -157,6 +157,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
                         <form action={toggleWave.bind(null, store.id, c.id, 1)}><button className="cc-wave" data-wave="1" data-on={c.wave1_done} aria-pressed={c.wave1_done}>{c.wave1_done ? <Check size={15} aria-hidden /> : <span className="cc-dot" aria-hidden />} Wave 1</button></form>
                         <form action={toggleWave.bind(null, store.id, c.id, 2)}><button className="cc-wave" data-wave="2" data-on={c.wave2_done} aria-pressed={c.wave2_done}>{c.wave2_done ? <Check size={15} aria-hidden /> : <span className="cc-dot" aria-hidden />} Wave 2</button></form>
                         <span className="cc-sep" aria-hidden />
+                        {worldwide && <Link className="x-btn" href={`/appointments?d=${store.id}&campaign=${c.id}#set`} style={{ display: "inline-flex", alignItems: "center" }}>Set appointment</Link>}
                         <ModalForm button="Upload CSV" title={`Upload a list to ${c.name}`} note="A CSV file with a header row. Up to 20,000 rows." submit="Upload" action={uploadList.bind(null, store.id)}><input type="hidden" name="campaign_id" value={c.id} /><Field label="CSV file"><input className="x-input" type="file" name="file" accept=".csv,text/csv" required style={{ paddingTop: 8 }} /></Field><Field label="Note (optional)"><input className="x-input" name="note" /></Field></ModalForm>
                         <ModalForm button="Edit" title={`Edit ${c.name}`} action={saveCampaign.bind(null, store.id, c.id)}><CampaignFields c={c} categories={categories} /></ModalForm>
                         <ActionButton label="Delete" confirm={`Delete ${c.name}? Its analytics entries are deleted too.`} action={deleteCampaign.bind(null, store.id, c.id)} />
@@ -165,6 +166,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
                       <>
                         <span className="cc-wave" data-wave="1" data-on={c.wave1_done}>{c.wave1_done ? <Check size={15} aria-hidden /> : <span className="cc-dot" aria-hidden />} Wave 1</span>
                         <span className="cc-wave" data-wave="2" data-on={c.wave2_done}>{c.wave2_done ? <Check size={15} aria-hidden /> : <span className="cc-dot" aria-hidden />} Wave 2</span>
+                        {worldwide && <><span className="cc-sep" aria-hidden />{worldwide && <Link className="x-btn" href={`/appointments?d=${store.id}&campaign=${c.id}#set`} style={{ display: "inline-flex", alignItems: "center" }}>Set appointment</Link>}</>}
                         {canUpload && <><span className="cc-sep" aria-hidden /><ModalForm button="Upload CSV" title={`Upload a list to ${c.name}`} note="A CSV file with a header row. Up to 20,000 rows." submit="Upload" action={uploadList.bind(null, store.id)}><input type="hidden" name="campaign_id" value={c.id} /><Field label="CSV file"><input className="x-input" type="file" name="file" accept=".csv,text/csv" required style={{ paddingTop: 8 }} /></Field><Field label="Note (optional)"><input className="x-input" name="note" /></Field></ModalForm></>}
                       </>
                     )}
@@ -181,16 +183,27 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
 
   if (tab === "analytics") {
     const inRange = stats.filter((s) => (!from || s.stat_date >= from) && (!to || s.stat_date <= to));
+    // Appointments overall: the counts entered in the Analytics Breakdown plus the ones set on the Appointments page.
+    const { data: a1 } = await client.from("appointments").select("campaign_id,created_at").eq("dealership_id", store.id).neq("status", "cancelled").limit(20000);
+    const setOn = ((a1 ?? []) as { campaign_id: string | null; created_at: string }[]).map((a) => ({ campaign_id: a.campaign_id, day: new Date(a.created_at).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) }));
+    const setInRange = setOn.filter((a) => (!from || a.day >= from) && (!to || a.day <= to));
     const per = new Map<string, { calls: number; appts: number }>();
     for (const s of inRange) {
       const t = per.get(s.campaign_id) ?? { calls: 0, appts: 0 };
       t.calls += s.calls_made; t.appts += s.appointments_set;
       per.set(s.campaign_id, t);
     }
+    for (const a of setInRange) {
+      if (!a.campaign_id) continue;
+      const t = per.get(a.campaign_id) ?? { calls: 0, appts: 0 };
+      t.appts += 1;
+      per.set(a.campaign_id, t);
+    }
     const calls = inRange.reduce((a, s) => a + s.calls_made, 0);
-    const appts = inRange.reduce((a, s) => a + s.appointments_set, 0);
+    const appts = inRange.reduce((a, s) => a + s.appointments_set, 0) + setInRange.length;
     const week = new Date(Date.now() - 6 * 86400000).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
     const recent = stats.filter((s) => s.stat_date >= week);
+    const recentAppts = recent.reduce((a, s) => a + s.appointments_set, 0) + setOn.filter((a) => a.day >= week).length;
     const top = Math.max(1, ...[...per.values()].map((t) => t.calls));
     body = (
       <>
@@ -204,11 +217,11 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
         </form>
         <div className="cc-stats">
           <StatCard label="Outbound calls" icon={<PhoneCall size={18} aria-hidden />} value={calls} note={from || to ? "In the chosen dates" : "All time"} tone="slate" bar={100} />
-          <StatCard label="Appointments set" icon={<CalendarDays size={18} aria-hidden />} value={appts} note={`${pct(appts, calls)}% of calls set an appointment`} tone="green" bar={pct(appts, calls)} />
-          <StatCard label="Last 7 days" icon={<Clock size={18} aria-hidden />} value={recent.reduce((a, s) => a + s.calls_made, 0)} note={`${recent.reduce((a, s) => a + s.appointments_set, 0)} appointments set`} tone="blue" bar={100} />
+          <StatCard label="Appointments" icon={<CalendarDays size={18} aria-hidden />} value={appts} note={calls ? `${pct(appts, calls)}% of calls set an appointment` : "All appointments set"} tone="green" bar={pct(appts, calls)} />
+          <StatCard label="Last 7 days" icon={<Clock size={18} aria-hidden />} value={recent.reduce((a, s) => a + s.calls_made, 0)} note={`${recentAppts} appointments`} tone="blue" bar={100} />
           <StatCard label="Campaigns finished" icon={<ShieldCheck size={18} aria-hidden />} value={both} of={total} note={`${pct(both, total)}% have both waves done`} tone="violet" bar={pct(both, total)} />
         </div>
-        <Card title="By campaign" note="Calls and appointments come from the Analytics Breakdown entries.">
+        <Card title="By campaign" note="Calls come from the Analytics Breakdown. Appointments include those entered there and those set from the campaign.">
           {!campaigns.length ? <p className="text-sm text-ink-muted">No campaigns yet.</p> : (
             <div className="cc-bars">
               {campaigns.map((c) => {
