@@ -73,6 +73,6 @@ export async function requireUser(min: Role = "agent"): Promise<SessionUser> {
 }
 
 // The Service department's work groups in the HR hub: Service Group 1-5 and Service Leadership.
-export const isServiceTeam = (name: string | null | undefined) => /^service\b/i.test(String(name ?? "").trim());
+export const isServiceTeam = (name: string | null | undefined) => /^service (group|leadership)\b/i.test(String(name ?? "").trim());
 
 export const atLeast = (role: Role, min: Role) => RANK[role] >= RANK[min];

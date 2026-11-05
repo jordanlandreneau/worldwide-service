@@ -39,7 +39,7 @@ export async function lookups(): Promise<Lookups> {
     fetchAll<any>("campaigns", "id,name,category", "id"),
   ]);
   return {
-    storeList, stores: new Map(storeList.map((s) => [s.id, s])), teams: teams.map((t) => t.name as string).filter((n) => /^service\b/i.test(n)),
+    storeList, stores: new Map(storeList.map((s) => [s.id, s])), teams: teams.map((t) => t.name as string).filter((n) => /^service (group|leadership)\b/i.test(n)),
     people: new Map(users.map((u) => [String(u.email).toLowerCase(), `${u.first_name} ${u.last_name}`.trim() || u.email])),
     campaigns: new Map(campaigns.map((c) => [c.id, c.name])),
   };
