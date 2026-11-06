@@ -9,11 +9,13 @@ import { atLeast, requireUser } from "@/lib/access";
 import { db, fetchAll } from "@/lib/data";
 import { addMember, bulkAddMembers, deleteChat, markRead, removeMember, saveChat, sendFollowUp, sendReply, setMemberEmail, syncWhatsAppNames } from "@/lib/follow";
 import { CHANNELS, channelReady } from "@/lib/follow-send";
+import { teamsAccount, teamsConfigured } from "@/lib/follow-providers";
+import { pullTeams } from "@/lib/follow-sync";
 
 export const metadata = { title: "Follow-ups · Worldwide Service" };
 
 type Channel = keyof typeof CHANNELS;
-type Params = { view?: string; channel?: string; chat?: string; tab?: string; q?: string; msg?: string; reply?: string; mention?: string };
+type Params = { teams?: string; view?: string; channel?: string; chat?: string; tab?: string; q?: string; msg?: string; reply?: string; mention?: string };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ICON: Record<Channel, string> = { whatsapp: "💬", sms: "📱", slack: "🔔", email: "✉️", teams: "🟣", google_chat: "🗨️" };
 const DAY = 24 * 3600 * 1000;
@@ -37,6 +39,9 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   const initials = user.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   const view = sp.view === "manage" || sp.view === "analytics" ? sp.view : "dashboard";
   const client = db();
+  // Bring in new Teams replies first (at most every 2 minutes).
+  await pullTeams().catch(() => 0);
+  const teams = teamsConfigured() ? await teamsAccount().catch(() => null) : null;
   const [chats, stores, { data: unreadRows }, { data: memberRows }] = await Promise.all([
     fetchAll<any>("follow_chats", "id,name,channel,dealership_id,active,last_activity,whatsapp_group_id,teams_chat_id,google_chat_space,linq_group_id,slack_channel_id", "name"),
     fetchAll<any>("dealerships", "id,name,active", "name"),
@@ -80,9 +85,17 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
             </Link>
           ))}
         </div>
-        <div className={`fu-conn ${channelReady(channel) ? "on" : ""}`}>
-          {CHANNELS[channel]}: {channelReady(channel) ? "Connected" : "Not connected yet"}
-        </div>
+        {channel === "teams" ? (
+          <div className={`fu-conn ${teams ? "on" : ""}`}>
+            {!teamsConfigured() ? "Microsoft Teams: keys missing in Vercel" : teams ? <>Microsoft Teams: connected as {teams.name ?? teams.account}</> : "Microsoft Teams: not signed in"}
+            {teamsConfigured() && manager && <a className="fu-conn-btn" href="/api/public/microsoft-auth-start">{teams ? "Reconnect Teams" : "Connect Teams"}</a>}
+            {sp.teams && <span className="fu-conn-note">{{ connected: "Teams is connected.", failed: "Microsoft didn't accept the sign-in. Check the redirect URI and permissions.", expired: "The sign-in took too long. Try again.", cancelled: "Sign-in was cancelled.", denied: "Only managers can connect Teams.", missing: "Add the Microsoft keys in Vercel first." }[sp.teams] ?? ""}</span>}
+          </div>
+        ) : (
+          <div className={`fu-conn ${channelReady(channel) ? "on" : ""}`}>
+            {CHANNELS[channel]}: {channelReady(channel) ? "Connected" : "Not connected yet"}
+          </div>
+        )}
         <div className="fu-user">
           <span className="fu-avatar">{initials}</span>
           <div><strong>{user.name}</strong><span>{roleName}</span></div>

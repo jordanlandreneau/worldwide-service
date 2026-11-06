@@ -1,5 +1,6 @@
 import "server-only";
 import { escapeHtml } from "@/lib/mail";
+import { googleChatReady, googleChatSend, linqReady, linqSend, teamsConfigured, teamsSend } from "@/lib/follow-providers";
 
 // Delivers a message to a dealership chat on its own channel.
 // Each channel turns on when its keys are set in Vercel; until then it says what's missing.
@@ -17,6 +18,9 @@ import { CHANNEL_NAMES as CHANNELS } from "@/lib/follow-channels";
 export function channelReady(channel: Chat["channel"]) {
   if (channel === "email") return !!(process.env.RESEND_API_KEY && (process.env.FOLLOW_UP_EMAIL_FROM || process.env.INVITE_EMAIL_FROM));
   if (channel === "whatsapp") return !!((process.env.PERISKOPE_API_KEY ?? process.env.PERISKOPE_API) && process.env.PERISKOPE_PHONE);
+  if (channel === "sms") return linqReady();
+  if (channel === "teams") return teamsConfigured();
+  if (channel === "google_chat") return googleChatReady();
   return false;
 }
 
@@ -24,6 +28,9 @@ export async function deliver(chat: Chat, members: Member[], text: string, subje
   try {
     if (chat.channel === "email") return await email(members, text, subject);
     if (chat.channel === "whatsapp") return await whatsapp(chat, text);
+    if (chat.channel === "sms") return await linqSend(chat.linq_group_id, text);
+    if (chat.channel === "teams") return await teamsSend(chat.teams_chat_id, text);
+    if (chat.channel === "google_chat") return await googleChatSend(chat.google_chat_space, text);
     return { ok: false, error: `${CHANNELS[chat.channel]} isn't connected to the Service site yet.` };
   } catch {
     return { ok: false, error: `${CHANNELS[chat.channel]} didn't answer. Try again.` };

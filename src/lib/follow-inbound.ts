@@ -14,11 +14,11 @@ export function checkHookKey(request: NextRequest) {
 const digits = (v: string | null) => (v ?? "").replace(/\D/g, "").slice(-10);
 
 // Saves a store's reply, naming the sender from the chat's people list when the number matches.
-export async function saveInbound(chatId: string, m: { body: string; sender: string | null; externalId: string | null; at: string | number | null }) {
+export async function saveInbound(chatId: string, m: { body: string; sender: string | null; senderName?: string | null; externalId: string | null; at: string | number | null }) {
   const client = db();
-  let name: string | null = null;
+  let name: string | null = m.senderName ?? null;
   const last10 = digits(m.sender);
-  if (last10.length === 10) {
+  if (!name && last10.length === 10) {
     const { data: people } = await client.from("follow_members").select("name,phone").eq("chat_id", chatId);
     name = ((people ?? []) as any[]).find((p) => digits(p.phone) === last10)?.name ?? null;
   }

@@ -827,3 +827,5 @@ span.cc-wave { cursor: default; }
   .svc-menu-list { display: flex !important; flex-direction: column; position: static; border: 0; box-shadow: none; padding: 0; min-width: 0; background: none; }
   .svc-top-nav .svc-menu-list a { padding: 8px 12px; }
 }
+.fu-conn-btn { display: block; margin-top: 8px; text-align: center; padding: 7px 10px; border-radius: 6px; background: var(--fu-green); color: #fff !important; font-weight: 600; }
+.fu-conn-note { display: block; margin-top: 6px; color: var(--fu-ink); }
