@@ -81,7 +81,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
           {channels.map((ch) => (
             <Link key={ch} href={link({ channel: ch, view: view === "dashboard" ? undefined : view })} className={ch === channel ? "active" : ""} title={CHANNELS[ch]}>
               <span aria-hidden>{ICON[ch]}</span><span className="fu-ch-name">{CHANNELS[ch]}</span>
-              <i className={channelReady(ch) ? "on" : ""} aria-label={channelReady(ch) ? "connected" : "not connected"} />
+              <i className={(ch === "teams" ? !!teams : channelReady(ch)) ? "on" : ""} aria-label={(ch === "teams" ? !!teams : channelReady(ch)) ? "connected" : "not connected"} />
             </Link>
           ))}
         </div>
@@ -94,6 +94,12 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
         ) : (
           <div className={`fu-conn ${channelReady(channel) ? "on" : ""}`}>
             {CHANNELS[channel]}: {channelReady(channel) ? "Connected" : "Not connected yet"}
+          </div>
+        )}
+        {channel !== "teams" && teamsConfigured() && manager && !teams && (
+          <div className="fu-conn">
+            Microsoft Teams: not signed in
+            <a className="fu-conn-btn" href="/api/public/microsoft-auth-start">Connect Teams</a>
           </div>
         )}
         <div className="fu-user">
