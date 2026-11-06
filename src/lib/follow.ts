@@ -102,7 +102,7 @@ export async function saveChat(id: string | null, _: Result, f: FormData): Promi
   const { data, error } = await client.from("follow_chats").insert({ ...fields, created_by: user.email }).select("id").single();
   if (error || !data) return { error: "Couldn't add this chat." };
   refresh();
-  redirect(`/follow-up/${data.id}`);
+  redirect(`/follow-up?chat=${data.id}`);
 }
 
 export async function addMember(chatId: string, _: Result, f: FormData): Promise<Result> {

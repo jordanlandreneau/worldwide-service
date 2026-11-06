@@ -71,11 +71,11 @@ async function whatsapp(chat: Chat, text: string): Promise<Sent> {
 // The follow-up layout the BDC already uses in the dealer chats.
 export function followUpText(f: { customer: string; phone: string; vehicle: string | null; vin: string | null; advisor: string | null; reason: string }) {
   return [
-    `Name: ${f.customer}`,
-    `Phone: ${f.phone}`,
+    `Name and Last name: ${f.customer}`,
+    `Phone number: ${f.phone}`,
     f.vehicle ? `Vehicle: ${f.vehicle}` : null,
     f.vin ? `VIN: ${f.vin}` : null,
     f.advisor ? `Advisor: ${f.advisor}` : null,
-    `Reason for call: ${f.reason}`,
+    `Reason for a call: ${f.reason}`,
   ].filter(Boolean).join("\n");
 }
