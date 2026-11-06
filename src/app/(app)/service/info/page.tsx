@@ -47,11 +47,11 @@ function Section({ id, title, alert, children }: { id: string; title: string; al
   );
 }
 
-function Grid({ head, rows, empty }: { head: string[]; rows: ReactNode[][]; empty: string }) {
+function Grid({ head, rows, empty, kind }: { head: string[]; rows: ReactNode[][]; empty: string; kind?: string }) {
   if (!rows.length) return <p className="svc-empty">{empty}</p>;
   return (
     <div className="svc-table-wrap">
-      <table className="svc-table">
+      <table className={`svc-table${kind ? ` svc-table-${kind}` : ""}`}>
         <thead><tr>{head.map((h) => <th key={h} scope="col">{h}</th>)}</tr></thead>
         <tbody>{rows.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j}>{c}</td>)}</tr>)}</tbody>
       </table>
@@ -170,10 +170,10 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
             </Section>
           ))}
           <Section id="pricing" title="Pricing">
-            <Grid head={["Service", "Price", "Comments"]} rows={(b.pricing ?? []).map((p: any) => [p.service, p.price === null || p.price === undefined ? "—" : `$${p.price}`, p.comments ?? "—"])} empty="No pricing yet." />
+            <Grid kind="pricing" head={["Service", "Price", "Comments"]} rows={(b.pricing ?? []).map((p: any) => [p.service, p.price === null || p.price === undefined ? "—" : `$${p.price}`, p.comments ?? "—"])} empty="No pricing yet." />
           </Section>
           <Section id="contacts" title="Directory">
-            <Grid head={["Name", "Title", "Phone", "Email", "Comments"]} rows={(b.contacts ?? []).map((c: any) => [c.name ?? "—", c.title ?? "—", c.phone ?? "—", c.email ? <a key="e" href={`mailto:${c.email}`}>{c.email}</a> : "—", c.comments ?? "—"])} empty="No contacts yet." />
+            <Grid kind="directory" head={["Name", "Title", "Phone", "Email", "Comments"]} rows={(b.contacts ?? []).map((c: any) => [c.name ?? "—", c.title ?? "—", c.phone ?? "—", c.email ? <a key="e" href={`mailto:${c.email}`}>{c.email}</a> : "—", c.comments ?? "—"])} empty="No contacts yet." />
           </Section>
         </div>
       </div>

@@ -841,3 +841,11 @@ span.cc-wave { cursor: default; }
 .svc-map-bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding: 10px 14px; font-size: 14px; }
 .svc-map-bar a { color: var(--portimao, #1f5fbf); font-weight: 600; text-decoration: none; }
 @media (max-width: 700px) { .svc-map iframe { height: 240px; } }
+/* Pricing and directory: prices, phones and emails never break mid-value */
+.svc-table-pricing { table-layout: auto; }
+.svc-table-pricing td:nth-child(1) { width: 45%; min-width: 220px; }
+.svc-table-pricing th:nth-child(2), .svc-table-pricing td:nth-child(2) { white-space: nowrap; width: 1%; text-align: right; padding-right: 24px; }
+.svc-table-pricing td:nth-child(3) { min-width: 200px; }
+.svc-table-directory td:nth-child(3), .svc-table-directory td:nth-child(4) { white-space: nowrap; }
+.svc-table td { overflow-wrap: normal; word-break: normal; }
+@media (max-width: 700px) { .svc-table-pricing td:nth-child(1) { min-width: 160px; } }
