@@ -105,31 +105,31 @@ export async function teamsSend(chatId: string | null, text: string): Promise<Se
   return { ok: true, externalId: body.id };
 }
 
-// Reads recent Teams messages for each Teams chat and saves the store's replies.
-export async function teamsPull(chats: { id: string; teams_chat_id: string | null }[], save: (chatId: string, m: { body: string; sender: string | null; senderName: string | null; externalId: string; at: string }) => Promise<void>) {
+// Reads recent Teams messages for each Teams chat (all chats at once) and hands the store's messages to save.
+export type Pulled = { body: string; sender: string | null; senderName: string | null; externalId: string; at: string };
+export async function teamsPull(chats: { id: string; teams_chat_id: string | null }[], save: (chatId: string, list: Pulled[]) => Promise<number>) {
   const token = await teamsAccess().catch(() => null);
   if (!token) return 0;
   const me = (await getState<MsTokens>("teams"))?.account?.toLowerCase();
-  let saved = 0;
-  for (const c of chats) {
-    if (!c.teams_chat_id) continue;
-    const res = await fetch(`https://graph.microsoft.com/v1.0/chats/${encodeURIComponent(c.teams_chat_id)}/messages?$top=20`, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) continue;
-    const list = ((await res.json().catch(() => ({}))) as any).value ?? [];
-    for (const m of list) {
-      if (m.messageType !== "message" || m.deletedDateTime) continue;
-      const user = m.from?.user;
-      if (!user) continue;
-      const html = String(m.body?.content ?? "");
-      const body = html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').trim();
-      if (!body) continue;
-      const fromMe = me && String(user.userPrincipalName ?? "").toLowerCase() === me;
-      if (fromMe) continue;
-      await save(c.id, { body, sender: user.id ?? null, senderName: user.displayName ?? null, externalId: m.id, at: m.createdDateTime });
-      saved++;
-    }
-  }
-  return saved;
+  const counts = await Promise.all(chats.filter((c) => c.teams_chat_id).map(async (c) => {
+    try {
+      const res = await fetch(`https://graph.microsoft.com/v1.0/chats/${encodeURIComponent(c.teams_chat_id!)}/messages?$top=20`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return 0;
+      const list = ((await res.json().catch(() => ({}))) as any).value ?? [];
+      const out: Pulled[] = [];
+      for (const m of list) {
+        if (m.messageType !== "message" || m.deletedDateTime) continue;
+        const user = m.from?.user;
+        if (!user) continue;
+        if (me && String(user.userPrincipalName ?? "").toLowerCase() === me) continue;
+        const html = String(m.body?.content ?? "");
+        const body = html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').trim();
+        if (body) out.push({ body, sender: user.id ?? null, senderName: user.displayName ?? null, externalId: m.id, at: m.createdDateTime });
+      }
+      return await save(c.id, out);
+    } catch { return 0; }
+  }));
+  return counts.reduce((a, b) => a + b, 0);
 }
 
 // ---------- Google Chat (a Chat app using the service account) ----------

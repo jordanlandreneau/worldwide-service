@@ -849,3 +849,6 @@ span.cc-wave { cursor: default; }
 .svc-table-directory td:nth-child(3), .svc-table-directory td:nth-child(4) { white-space: nowrap; }
 .svc-table td { overflow-wrap: normal; word-break: normal; }
 @media (max-width: 700px) { .svc-table-pricing td:nth-child(1) { min-width: 160px; } }
+.fu-skel { border-radius: 8px; background: linear-gradient(90deg, var(--fu-card) 25%, var(--fu-hover) 50%, var(--fu-card) 75%); background-size: 200% 100%; animation: fu-shimmer 1.2s infinite; }
+@keyframes fu-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .fu-skel { animation: none; } }

@@ -10,7 +10,7 @@ import { db, fetchAll } from "@/lib/data";
 import { addMember, bulkAddMembers, deleteChat, markRead, removeMember, saveChat, sendFollowUp, sendReply, setMemberEmail, syncWhatsAppNames } from "@/lib/follow";
 import { CHANNELS, channelReady } from "@/lib/follow-send";
 import { teamsAccount, teamsConfigured } from "@/lib/follow-providers";
-import { pullTeams, pullWhatsApp } from "@/lib/follow-sync";
+import { LiveSync } from "@/components/follow-live";
 
 export const metadata = { title: "Follow-ups · Worldwide Service" };
 
@@ -39,10 +39,10 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   const initials = user.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   const view = sp.view === "manage" || sp.view === "analytics" ? sp.view : "dashboard";
   const client = db();
-  // Bring in new Teams replies first (at most every 2 minutes).
-  await Promise.all([pullTeams().catch(() => 0), pullWhatsApp().catch(() => 0)]);
-  const teams = teamsConfigured() ? await teamsAccount().catch(() => null) : null;
-  const [chats, stores, { data: unreadRows }, { data: memberRows }] = await Promise.all([
+  // New replies are pulled in the background by <LiveSync />, so the page doesn't wait on the chat apps.
+  // Everything the page needs is read at once.
+  const [teams, chats, stores, { data: unreadRows }, { data: memberRows }] = await Promise.all([
+    teamsConfigured() ? teamsAccount().catch(() => null) : Promise.resolve(null),
     fetchAll<any>("follow_chats", "id,name,channel,dealership_id,active,last_activity,whatsapp_group_id,teams_chat_id,google_chat_space,linq_group_id,slack_channel_id", "name"),
     fetchAll<any>("dealerships", "id,name,active", "name"),
     client.from("follow_messages").select("chat_id").eq("direction", "inbound").eq("read", false).limit(5000),
@@ -65,6 +65,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
 
   return (
     <div className="fu-app" data-theme={theme}>
+      <LiveSync />
       <aside className="fu-side">
         <div className="fu-side-head">
           <span className="fu-logo"><MessagesSquare size={18} /></span>
