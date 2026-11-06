@@ -459,7 +459,7 @@ span.cc-wave { cursor: default; }
 .svc-brand span { display: flex; flex-direction: column; }
 .svc-brand strong { font-stretch: var(--wide); font-weight: 500; font-size: 15px; letter-spacing: .02em; }
 .svc-brand small { color: #8c96a5; font-size: 12px; }
-.svc-top-nav { display: flex; gap: 4px; margin-left: auto; overflow-x: auto; scrollbar-width: none; }
+.svc-top-nav { display: flex; align-items: center; gap: 2px; margin-left: auto; }
 .svc-top-nav a { position: relative; color: #aeb7c4; text-decoration: none; padding: 8px 12px; font-size: 14px; font-weight: 500; white-space: nowrap; }
 .svc-top-nav a:hover, .svc-top-nav a.active { color: #fff; }
 .svc-top-nav a.active::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -13px; height: 2px; background: var(--portimao); }
@@ -803,3 +803,27 @@ span.cc-wave { cursor: default; }
 .fu-row-actions { display: flex; align-items: center; gap: 6px; }
 .fu-mention { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--fu-green) !important; padding: 4px 8px; }
 .fu-app .fu-email .x-btn { padding: 3px 8px; font-size: 11px; color: var(--fu-green); }
+
+/* Top bar: main tabs plus More and Admin menus, so nothing hides in a sideways scroll */
+.svc-menu-group { position: relative; }
+.svc-menu-group > button { display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; color: #aeb7c4; padding: 8px 12px; font-size: 14px; font-weight: 500; cursor: pointer; white-space: nowrap; font-family: inherit; position: relative; }
+.svc-menu-group > button:hover, .svc-menu-group > button.active, .svc-menu-group[data-open="true"] > button { color: #fff; }
+.svc-menu-group > button.active::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -13px; height: 2px; background: var(--portimao); }
+.svc-menu-group > button svg { transition: transform .15s; }
+.svc-menu-group[data-open="true"] > button svg { transform: rotate(180deg); }
+.svc-menu-list { display: none; position: absolute; right: 0; top: calc(100% + 12px); min-width: 210px; background: var(--sapphire); border: 1px solid var(--sapphire-line); border-radius: 4px; padding: 6px; box-shadow: 0 12px 28px rgba(0,0,0,.35); z-index: 60; }
+.svc-menu-group[data-open="true"] .svc-menu-list { display: flex; flex-direction: column; }
+.svc-top-nav .svc-menu-list a { padding: 9px 12px; border-radius: 3px; }
+.svc-top-nav .svc-menu-list a:hover { background: var(--sapphire-2); }
+.svc-top-nav .svc-menu-list a.active::after { display: none; }
+.svc-top-nav .svc-menu-list a.active { background: var(--sapphire-2); }
+@media (max-width: 1100px) {
+  .svc-top-nav .svc-menu-group > button { padding: 8px 8px; }
+  .svc-top-nav > a { padding: 8px 8px; font-size: 13px; }
+}
+@media (max-width: 900px) {
+  .svc-top-nav { align-items: stretch; }
+  .svc-menu-group > button { display: none; }
+  .svc-menu-list { display: flex !important; flex-direction: column; position: static; border: 0; box-shadow: none; padding: 0; min-width: 0; background: none; }
+  .svc-top-nav .svc-menu-list a { padding: 8px 12px; }
+}
