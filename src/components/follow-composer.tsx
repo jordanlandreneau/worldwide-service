@@ -3,11 +3,41 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import type { Result } from "@/lib/manage";
 
 type Action = (state: Result, form: FormData) => Promise<Result>;
+type Dispatch = { customer_name: string; customer_phone: string; vehicle: string; advisor: string; vin: string; reason: string };
 const REASONS = ["Wants a service update", "Coming in to pick up vehicle", "Declined recommended services", "Asking about pricing", "Wants to reschedule", "Requesting a callback"];
+const EMPTY: Dispatch = { customer_name: "", customer_phone: "", vehicle: "", advisor: "", vin: "", reason: "" };
+
+const read = (key: string) => { try { return JSON.parse(localStorage.getItem(key) ?? "null"); } catch { return null; } };
+const write = (key: string, v: unknown) => { try { if (v === null) localStorage.removeItem(key); else localStorage.setItem(key, JSON.stringify(v)); } catch { /* storage off */ } };
+
+export function dispatchText(f: Dispatch) {
+  return [
+    `Name and Last name: ${f.customer_name}`,
+    `Phone number: ${f.customer_phone}`,
+    f.vehicle && `Vehicle: ${f.vehicle}`,
+    f.vin && `VIN: ${f.vin.toUpperCase()}`,
+    f.advisor && `@${f.advisor}`,
+    `Reason for a call: ${f.reason}`,
+  ].filter(Boolean).join("\n");
+}
 
 // The bottom of a chat: a plain message, or a customer dispatch in the BDC's usual layout.
-export function Composer({ channel, recipients, advisors, sendMessage, sendDispatch }: { channel: string; recipients: number; advisors: string[]; sendMessage: Action; sendDispatch: Action }) {
+// Drafts are kept in this browser per chat until sent or cleared.
+export function Composer({ chatId, channel, recipients, advisors, initialText = "", sendMessage, sendDispatch }: {
+  chatId: string; channel: string; recipients: number; advisors: string[]; initialText?: string; sendMessage: Action; sendDispatch: Action;
+}) {
+  const key = `fu_draft_${chatId}`;
   const [mode, setMode] = useState<"message" | "dispatch">("message");
+  const [body, setBody] = useState(initialText);
+  const [f, setF] = useState<Dispatch>(EMPTY);
+  const [saved, setSaved] = useState("");
+  useEffect(() => {
+    const d = read(key);
+    if (d) { if (!initialText) setBody(d.body ?? ""); setF({ ...EMPTY, ...(d.dispatch ?? {}) }); if (d.mode && !initialText) setMode(d.mode); }
+  }, [key, initialText]);
+  const saveDraft = () => { write(key, { body, dispatch: f, mode }); setSaved("Draft saved."); setTimeout(() => setSaved(""), 2000); };
+  const clearDraft = () => write(key, null);
+
   return (
     <div className="fu-composer">
       <div className="fu-composer-head">
@@ -18,49 +48,51 @@ export function Composer({ channel, recipients, advisors, sendMessage, sendDispa
         <button type="button" role="tab" aria-selected={mode === "message"} onClick={() => setMode("message")}>Message</button>
         <button type="button" role="tab" aria-selected={mode === "dispatch"} onClick={() => setMode("dispatch")}>Customer dispatch</button>
       </div>
-      {mode === "message" ? <MessageForm channel={channel} action={sendMessage} /> : <DispatchForm advisors={advisors} action={sendDispatch} />}
+      {mode === "message"
+        ? <MessageForm channel={channel} body={body} setBody={setBody} action={sendMessage} onSent={() => { setBody(""); clearDraft(); }} onDraft={saveDraft} saved={saved} />
+        : <DispatchForm advisors={advisors} f={f} setF={setF} action={sendDispatch} onSent={() => { setF(EMPTY); clearDraft(); }} onDraft={saveDraft} saved={saved}
+            onInsert={() => { setBody((b) => (b.trim() ? `${b.trim()}\n\n` : "") + dispatchText(f)); setMode("message"); }} />}
     </div>
   );
 }
 
-function Status({ state }: { state: Result }) {
+function Status({ state, saved }: { state: Result; saved: string }) {
   if (state.error) return <p role="alert" className="fu-error">{state.error}</p>;
+  if (saved) return <p role="status" className="fu-ok">{saved}</p>;
   if (state.ok) return <p role="status" className="fu-ok">Sent.</p>;
   return null;
 }
 
-function MessageForm({ channel, action }: { channel: string; action: Action }) {
+function useSent(action: Action, onSent: () => void) {
   const [state, formAction, pending] = useActionState(action, {});
-  const [body, setBody] = useState("");
+  const last = useRef<Result>({});
+  useEffect(() => { if (state.ok && state !== last.current) { last.current = state; onSent(); } }, [state]); // eslint-disable-line react-hooks/exhaustive-deps
+  return [state, formAction, pending] as const;
+}
+
+function MessageForm({ channel, body, setBody, action, onSent, onDraft, saved }: { channel: string; body: string; setBody: (v: string) => void; action: Action; onSent: () => void; onDraft: () => void; saved: string }) {
+  const [state, formAction, pending] = useSent(action, onSent);
   const form = useRef<HTMLFormElement>(null);
-  useEffect(() => { if (state.ok) setBody(""); }, [state]);
   return (
     <form ref={form} action={formAction}>
       <textarea className="fu-input" name="body" rows={3} maxLength={4096} placeholder={`Message via ${channel}…`} value={body} onChange={(e) => setBody(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) form.current?.requestSubmit(); }} />
-      <Status state={state} />
+      <Status state={state} saved={saved} />
       <div className="fu-composer-foot">
-        <span className="fu-muted">{body.length}/4096</span>
+        <span className="fu-muted">{body.length}/4096 · Ctrl+Enter to send</span>
+        <button type="button" className="fu-ghost" onClick={onDraft} disabled={!body.trim()}>Save as draft</button>
         <button className="fu-send" disabled={pending || !body.trim()}>{pending ? "Sending…" : "Send message"}</button>
       </div>
     </form>
   );
 }
 
-function DispatchForm({ advisors, action }: { advisors: string[]; action: Action }) {
-  const [state, formAction, pending] = useActionState(action, {});
-  const empty = { customer_name: "", customer_phone: "", vehicle: "", advisor: "", vin: "", reason: "" };
-  const [f, setF] = useState(empty);
-  useEffect(() => { if (state.ok) setF(empty); }, [state]); // eslint-disable-line react-hooks/exhaustive-deps
-  const set = (k: keyof typeof empty) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
-  const preview = [
-    `Name and Last name: ${f.customer_name}`,
-    `Phone number: ${f.customer_phone}`,
-    f.vehicle && `Vehicle: ${f.vehicle}`,
-    f.vin && `VIN: ${f.vin.toUpperCase()}`,
-    f.advisor && `Advisor: ${f.advisor}`,
-    `Reason for a call: ${f.reason}`,
-  ].filter(Boolean).join("\n");
+function DispatchForm({ advisors, f, setF, action, onSent, onDraft, onInsert, saved }: {
+  advisors: string[]; f: Dispatch; setF: (v: Dispatch) => void; action: Action; onSent: () => void; onDraft: () => void; onInsert: () => void; saved: string;
+}) {
+  const [state, formAction, pending] = useSent(action, onSent);
+  const set = (k: keyof Dispatch) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
+  const ready = !!(f.customer_name && f.customer_phone && f.reason);
   return (
     <form action={formAction}>
       <div className="fu-grid">
@@ -76,11 +108,14 @@ function DispatchForm({ advisors, action }: { advisors: string[]; action: Action
       <div className="fu-chips">{REASONS.map((r) => <button key={r} type="button" className="fu-chip" aria-pressed={f.reason === r} onClick={() => setF({ ...f, reason: r })}>{r}</button>)}</div>
       <textarea className="fu-input" name="reason" rows={2} value={f.reason} onChange={set("reason")} placeholder="Customer wants to know…" />
       {!f.advisor && <p className="fu-warn">No advisor selected. You can still send.</p>}
-      <div className="fu-preview"><span className="fu-eyebrow">Preview</span><pre>{preview}</pre></div>
-      <Status state={state} />
+      <div className="fu-preview"><span className="fu-eyebrow">Preview</span><pre>{dispatchText(f)}</pre></div>
+      <Status state={state} saved={saved} />
       <div className="fu-composer-foot">
-        <button type="button" className="fu-ghost" onClick={() => setF(empty)}>Clear</button>
-        <button className="fu-send" disabled={pending || !f.customer_name || !f.customer_phone || !f.reason}>{pending ? "Sending…" : "Send dispatch"}</button>
+        <button type="button" className="fu-ghost" onClick={onInsert} disabled={!ready}>Insert into message</button>
+        <button type="button" className="fu-ghost" onClick={() => setF(EMPTY)}>Clear</button>
+        <button type="button" className="fu-ghost" onClick={onDraft}>Save as draft</button>
+        {!ready && <span className="fu-muted">Add a name, phone and reason to send.</span>}
+        <button className="fu-send" disabled={pending || !ready}>{pending ? "Sending…" : "Send dispatch"}</button>
       </div>
     </form>
   );

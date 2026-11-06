@@ -3,11 +3,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/access";
 import { db } from "@/lib/data";
-import { type Chat, deliver, followUpText, type Member } from "@/lib/follow-send";
+import { type Chat, deliver, followUpText, type Member, whatsappNames } from "@/lib/follow-send";
 import type { Result } from "@/lib/manage";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CHANNELS = ["whatsapp", "teams", "email", "google_chat", "sms"];
+const CHANNELS = ["whatsapp", "teams", "email", "google_chat", "sms", "slack"];
 const text = (f: FormData, k: string, max = 2000) => {
   const v = String(f.get(k) ?? "").trim().slice(0, max);
   return v === "" ? null : v;
@@ -18,7 +18,7 @@ async function loadChat(id: string) {
   if (!UUID.test(id)) return null;
   const client = db();
   const [{ data: chat }, { data: members }] = await Promise.all([
-    client.from("follow_chats").select("id,name,channel,whatsapp_group_id,teams_chat_id,google_chat_space,linq_group_id,active").eq("id", id).maybeSingle(),
+    client.from("follow_chats").select("id,name,channel,whatsapp_group_id,teams_chat_id,google_chat_space,linq_group_id,slack_channel_id,active").eq("id", id).maybeSingle(),
     client.from("follow_members").select("name,phone,email").eq("chat_id", id),
   ]);
   return chat ? { chat: chat as Chat & { active: boolean }, members: (members ?? []) as Member[] } : null;
@@ -89,7 +89,7 @@ export async function saveChat(id: string | null, _: Result, f: FormData): Promi
   const fields = {
     name, channel, dealership_id: store,
     whatsapp_group_id: text(f, "whatsapp_group_id", 120), teams_chat_id: text(f, "teams_chat_id", 200),
-    google_chat_space: text(f, "google_chat_space", 120), linq_group_id: text(f, "linq_group_id", 120),
+    google_chat_space: text(f, "google_chat_space", 120), linq_group_id: text(f, "linq_group_id", 120), slack_channel_id: text(f, "slack_channel_id", 120),
     active: id ? f.get("active") !== null : true,
   };
   const client = db();
@@ -108,10 +108,9 @@ export async function saveChat(id: string | null, _: Result, f: FormData): Promi
 export async function addMember(chatId: string, _: Result, f: FormData): Promise<Result> {
   await requireUser("manager");
   if (!UUID.test(chatId)) return { error: "This chat no longer exists." };
-  const name = text(f, "name", 120);
+  const name = text(f, "name", 120) ?? "Unnamed";
   const email = text(f, "email", 200)?.toLowerCase() ?? null;
   const phone = text(f, "phone", 40);
-  if (!name) return { error: "Enter the person's name." };
   if (!email && !phone) return { error: "Enter an email or a phone number." };
   if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: "That email address doesn't look right." };
   const { error } = await db().from("follow_members").insert({ chat_id: chatId, name, email, phone, role: text(f, "role", 40) ?? "member" });
@@ -125,4 +124,61 @@ export async function removeMember(chatId: string, id: string) {
   if (!UUID.test(chatId) || !UUID.test(id)) return;
   await db().from("follow_members").delete().eq("id", id).eq("chat_id", chatId);
   refresh(chatId);
+}
+
+// Paste one person per line: "Name, phone, email" (any order after the name; phone and email are spotted by shape).
+export async function bulkAddMembers(chatId: string, _: Result, f: FormData): Promise<Result> {
+  await requireUser("manager");
+  if (!UUID.test(chatId)) return { error: "This chat no longer exists." };
+  const lines = String(f.get("lines") ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, 500);
+  if (!lines.length) return { error: "Paste at least one person." };
+  const rows = [];
+  for (const line of lines) {
+    const parts = line.split(/[,\t;|]/).map((p) => p.trim()).filter(Boolean);
+    const email = parts.find((p) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p))?.toLowerCase() ?? null;
+    const phone = parts.find((p) => p.replace(/\D/g, "").length >= 10 && !p.includes("@")) ?? null;
+    const name = parts.find((p) => p !== email && p !== phone && !/^[\d\s()+.-]+$/.test(p)) ?? "Unnamed";
+    if (!email && !phone) return { error: `"${line.slice(0, 60)}" has no phone or email.` };
+    rows.push({ chat_id: chatId, name: name.slice(0, 120), phone, email });
+  }
+  const { error } = await db().from("follow_members").insert(rows);
+  if (error) return { error: "Couldn't add these people." };
+  refresh(chatId);
+  return { ok: true };
+}
+
+export async function setMemberEmail(chatId: string, id: string, _: Result, f: FormData): Promise<Result> {
+  await requireUser("manager");
+  if (!UUID.test(chatId) || !UUID.test(id)) return { error: "This person no longer exists." };
+  const email = text(f, "email", 200)?.toLowerCase() ?? null;
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: "That email address doesn't look right." };
+  const { error } = await db().from("follow_members").update({ email }).eq("id", id).eq("chat_id", chatId);
+  if (error) return { error: "Couldn't save this email." };
+  refresh(chatId);
+  return { ok: true };
+}
+
+export async function syncWhatsAppNames(chatId: string, _: Result, __: FormData): Promise<Result> {
+  await requireUser("manager");
+  const found = await loadChat(chatId);
+  if (!found?.chat.whatsapp_group_id) return { error: "This chat has no WhatsApp group id." };
+  const names = await whatsappNames(found.chat.whatsapp_group_id);
+  if (typeof names === "string") return { error: names };
+  const client = db();
+  const { data: people } = await client.from("follow_members").select("id,phone,name").eq("chat_id", chatId);
+  let changed = 0;
+  for (const p of (people ?? []) as any[]) {
+    const n = names.get(String(p.phone ?? "").replace(/\D/g, "").slice(-10));
+    if (n && n !== p.name) { await client.from("follow_members").update({ name: n }).eq("id", p.id); changed++; }
+  }
+  refresh(chatId);
+  return changed ? { ok: true } : { error: "Names already match WhatsApp." };
+}
+
+export async function deleteChat(id: string) {
+  await requireUser("manager");
+  if (!UUID.test(id)) return;
+  await db().from("follow_chats").delete().eq("id", id);
+  revalidatePath("/follow-up");
+  redirect("/follow-up");
 }

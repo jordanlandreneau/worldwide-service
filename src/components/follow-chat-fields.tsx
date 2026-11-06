@@ -14,6 +14,7 @@ export function ChatFields({ chat, stores }: { chat?: any; stores: { id: string;
       <Field label="WhatsApp group id (WhatsApp chats)"><input className="x-input" name="whatsapp_group_id" defaultValue={chat?.whatsapp_group_id ?? ""} placeholder="120363...@g.us" /></Field>
       <Field label="Teams chat id (Teams chats)"><input className="x-input" name="teams_chat_id" defaultValue={chat?.teams_chat_id ?? ""} placeholder="19:...@thread.v2" /></Field>
       <Field label="Google Chat space (Google Chat)"><input className="x-input" name="google_chat_space" defaultValue={chat?.google_chat_space ?? ""} placeholder="spaces/AAAA..." /></Field>
+      <Field label="Slack channel id (Slack chats)"><input className="x-input" name="slack_channel_id" defaultValue={chat?.slack_channel_id ?? ""} placeholder="C0123456789" /></Field>
       <Field label="Linq group id (text chats)"><input className="x-input" name="linq_group_id" defaultValue={chat?.linq_group_id ?? ""} /></Field>
       {chat && <label className="text-sm" style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" name="active" defaultChecked={chat.active} /> Chat is on</label>}
     </>

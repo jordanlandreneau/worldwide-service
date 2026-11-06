@@ -5,8 +5,8 @@ import { escapeHtml } from "@/lib/mail";
 // Each channel turns on when its keys are set in Vercel; until then it says what's missing.
 
 export type Chat = {
-  id: string; name: string; channel: "whatsapp" | "teams" | "email" | "google_chat" | "sms";
-  whatsapp_group_id: string | null; teams_chat_id: string | null; google_chat_space: string | null; linq_group_id: string | null;
+  id: string; name: string; channel: "whatsapp" | "teams" | "email" | "google_chat" | "sms" | "slack";
+  whatsapp_group_id: string | null; teams_chat_id: string | null; google_chat_space: string | null; linq_group_id: string | null; slack_channel_id?: string | null;
 };
 export type Member = { name: string; phone: string | null; email: string | null };
 export type Sent = { ok: true; externalId?: string } | { ok: false; error: string };
@@ -75,7 +75,29 @@ export function followUpText(f: { customer: string; phone: string; vehicle: stri
     `Phone number: ${f.phone}`,
     f.vehicle ? `Vehicle: ${f.vehicle}` : null,
     f.vin ? `VIN: ${f.vin}` : null,
-    f.advisor ? `Advisor: ${f.advisor}` : null,
+    f.advisor ? `@${f.advisor}` : null,
     `Reason for a call: ${f.reason}`,
   ].filter(Boolean).join("\n");
+}
+
+// Names from the WhatsApp group itself, through Periskope. Returns phone -> name.
+export async function whatsappNames(groupId: string): Promise<Map<string, string> | string> {
+  const key = process.env.PERISKOPE_API_KEY;
+  const phone = process.env.PERISKOPE_PHONE;
+  if (!key || !phone) return "WhatsApp isn't connected yet, so names can't be synced.";
+  try {
+    const res = await fetch(`https://api.periskope.app/v1/chats/${encodeURIComponent(groupId)}`, { headers: { Authorization: `Bearer ${key}`, "x-phone": phone } });
+    if (!res.ok) return `WhatsApp didn't return the group (${res.status}).`;
+    const body = (await res.json()) as any;
+    const list: any[] = body?.members ? Object.values(body.members) : body?.chat?.members ? Object.values(body.chat.members) : [];
+    const names = new Map<string, string>();
+    for (const m of list) {
+      const num = String(m?.contact_id ?? m?.id ?? "").replace(/@.*$/, "").replace(/\D/g, "");
+      const name = String(m?.contact_name ?? m?.name ?? m?.pushname ?? "").trim();
+      if (num && name) names.set(num.slice(-10), name);
+    }
+    return names;
+  } catch {
+    return "WhatsApp didn't answer. Try again.";
+  }
 }

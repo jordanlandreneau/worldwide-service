@@ -1,19 +1,21 @@
+import { cookies } from "next/headers";
 import Link from "next/link";
-import { BarChart3, Building2, LayoutDashboard, MessagesSquare, Search, Users } from "lucide-react";
+import { AtSign, BarChart3, Building2, LayoutDashboard, LogOut, MessageSquareText, MessagesSquare, Reply, Search, Users } from "lucide-react";
 import { ActionButton, Field, ModalForm } from "@/components/action-form";
+import { CopyButton, ThemeToggle } from "@/components/follow-bits";
 import { Composer } from "@/components/follow-composer";
 import { ChatFields } from "@/components/follow-chat-fields";
 import { atLeast, requireUser } from "@/lib/access";
 import { db, fetchAll } from "@/lib/data";
-import { addMember, markRead, removeMember, saveChat, sendFollowUp, sendReply } from "@/lib/follow";
+import { addMember, bulkAddMembers, deleteChat, markRead, removeMember, saveChat, sendFollowUp, sendReply, setMemberEmail, syncWhatsAppNames } from "@/lib/follow";
 import { CHANNELS, channelReady } from "@/lib/follow-send";
 
 export const metadata = { title: "Follow-ups · Worldwide Service" };
 
 type Channel = keyof typeof CHANNELS;
-type Params = { view?: string; channel?: string; chat?: string; tab?: string; q?: string };
+type Params = { view?: string; channel?: string; chat?: string; tab?: string; q?: string; msg?: string; reply?: string; mention?: string };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const ICON: Record<Channel, string> = { whatsapp: "💬", sms: "📱", email: "✉️", teams: "🟣", google_chat: "🗨️" };
+const ICON: Record<Channel, string> = { whatsapp: "💬", sms: "📱", slack: "🔔", email: "✉️", teams: "🟣", google_chat: "🗨️" };
 const DAY = 24 * 3600 * 1000;
 
 const time = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
@@ -30,10 +32,13 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   const user = await requireUser("agent");
   const manager = atLeast(user.role, "manager");
   const sp = await searchParams;
+  const theme = (await cookies()).get("fu_theme")?.value === "dark" ? "dark" : "light";
+  const roleName = { admin: "Admin", manager: "Manager", agent: "Agent", dealership: "Store" }[user.role];
+  const initials = user.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   const view = sp.view === "manage" || sp.view === "analytics" ? sp.view : "dashboard";
   const client = db();
   const [chats, stores, { data: unreadRows }, { data: memberRows }] = await Promise.all([
-    fetchAll<any>("follow_chats", "id,name,channel,dealership_id,active,last_activity,whatsapp_group_id,teams_chat_id,google_chat_space,linq_group_id", "name"),
+    fetchAll<any>("follow_chats", "id,name,channel,dealership_id,active,last_activity,whatsapp_group_id,teams_chat_id,google_chat_space,linq_group_id,slack_channel_id", "name"),
     fetchAll<any>("dealerships", "id,name,active", "name"),
     client.from("follow_messages").select("chat_id").eq("direction", "inbound").eq("read", false).limit(5000),
     client.from("follow_members").select("id,chat_id,name,phone,email,role").order("name").limit(10000),
@@ -54,11 +59,12 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   };
 
   return (
-    <div className="fu-app">
+    <div className="fu-app" data-theme={theme}>
       <aside className="fu-side">
         <div className="fu-side-head">
           <span className="fu-logo"><MessagesSquare size={18} /></span>
           <div><strong>Service BDC Portal</strong><span>Follow-ups</span></div>
+          <ThemeToggle initial={theme} />
         </div>
         <nav className="fu-nav" aria-label="Follow-up pages">
           <Link href={link({})} className={view === "dashboard" ? "active" : ""}><LayoutDashboard size={16} /> Dashboard</Link>
@@ -76,6 +82,11 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
         </div>
         <div className={`fu-conn ${channelReady(channel) ? "on" : ""}`}>
           {CHANNELS[channel]}: {channelReady(channel) ? "Connected" : "Not connected yet"}
+        </div>
+        <div className="fu-user">
+          <span className="fu-avatar">{initials}</span>
+          <div><strong>{user.name}</strong><span>{roleName}</span></div>
+          <form action="/auth/signout" method="post"><button className="fu-icon-btn" aria-label="Sign out" title="Sign out"><LogOut size={15} /></button></form>
         </div>
       </aside>
 
@@ -101,13 +112,18 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
               <Search size={15} aria-hidden />
               <input name="q" defaultValue={sp.q ?? ""} placeholder="Filter dealerships…" aria-label="Filter dealerships" />
             </form>
+            <form className="fu-search">
+              <input type="hidden" name="channel" value={channel} />
+              <MessageSquareText size={15} aria-hidden />
+              <input name="msg" defaultValue={sp.msg ?? ""} placeholder="Search all messages…" aria-label="Search all messages" />
+            </form>
             {manager && (
               <ModalForm button="+ Add dealership chat" title="New chat" note="Add a store's follow-up chat. The id comes from the chat app." action={saveChat.bind(null, null)} submit="Add chat">
                 <ChatFields chat={{ channel, active: true }} stores={activeStores} />
               </ModalForm>
             )}
           </div>
-          <ul className="fu-items">
+          {sp.msg?.trim() ? <MessageResults /> : <ul className="fu-items">
             {list.length === 0 && <li className="fu-muted fu-pad">No {CHANNELS[channel]} chats{needle ? " match" : " yet"}.</li>}
             {list.map((c: any) => {
               const st = status(c);
@@ -120,10 +136,34 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
                 </li>
               );
             })}
-          </ul>
+          </ul>}
         </section>
         <section className="fu-detail" aria-label="Chat">{selected ? <ChatPanel chat={selected} /> : <EmptyDetail />}</section>
       </>
+    );
+  }
+
+  async function MessageResults() {
+    const term = (sp.msg ?? "").trim().slice(0, 100).replace(/[%_\\]/g, "\\$&");
+    const { data } = await client.from("follow_messages").select("id,chat_id,body,direction,sender_name,created_at").ilike("body", `%${term}%`).order("created_at", { ascending: false }).limit(60);
+    const rows = (data ?? []) as any[];
+    const byId = new Map(chats.map((c: any) => [c.id, c]));
+    return (
+      <ul className="fu-items">
+        <li className="fu-muted" style={{ fontSize: 12 }}>{rows.length} {rows.length === 1 ? "message" : "messages"} found · <Link href={link({})}>clear search</Link></li>
+        {rows.map((m) => {
+          const c: any = byId.get(m.chat_id);
+          return (
+            <li key={m.id}>
+              <Link href={link({ chat: m.chat_id, channel: c?.channel, msg: sp.msg })} className="fu-item">
+                <span className="fu-item-top"><strong>{c?.name ?? "Chat"}</strong><em className="fu-badge">{m.direction === "inbound" ? "Reply" : "Sent"}</em></span>
+                <span className="fu-snippet">{m.body.slice(0, 140)}</span>
+                <span className="fu-item-sub">{day(m.created_at)} {time(m.created_at)}</span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
     );
   }
 
@@ -142,7 +182,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
     const people = members.get(chat.id) ?? [];
     const store = stores.find((s: any) => s.id === chat.dealership_id);
     const ch = chat.channel as Channel;
-    const ident = chat.whatsapp_group_id ?? chat.teams_chat_id ?? chat.google_chat_space ?? chat.linq_group_id;
+    const ident = chat.whatsapp_group_id ?? chat.teams_chat_id ?? chat.google_chat_space ?? chat.linq_group_id ?? chat.slack_channel_id;
     return (
       <>
         <header className="fu-detail-head">
@@ -150,11 +190,15 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
             <h2>{chat.name} <em className="fu-pill">{ICON[ch]} {CHANNELS[ch]}</em> <em className={`fu-badge ${status(chat)}`}>{status(chat) === "pending" ? "Pending" : status(chat) === "active" ? "Active" : "Inactive"}</em>{!chat.active && <em className="fu-badge off">Off</em>}</h2>
             <p className="fu-mono fu-muted">{ident ? `id: ${ident}` : "No chat id yet"}{store ? <> · <Link href={`/service/info?d=${store.id}`}>{store.name}</Link></> : null}</p>
           </div>
-          {manager && (
-            <ModalForm button="Settings" title="Chat settings" action={saveChat.bind(null, chat.id)}>
-              <ChatFields chat={chat} stores={stores.filter((s: any) => s.active !== false || s.id === chat.dealership_id)} />
-            </ModalForm>
-          )}
+          <div className="fu-head-actions">
+            {ident && <CopyButton value={ident} />}
+            {manager && (
+              <ModalForm button="Settings" title="Chat settings" action={saveChat.bind(null, chat.id)}>
+                <ChatFields chat={chat} stores={stores.filter((s: any) => s.active !== false || s.id === chat.dealership_id)} />
+              </ModalForm>
+            )}
+            {manager && <ActionButton label="Delete" confirm={`Delete "${chat.name}", its roster and its messages? This can't be undone.`} action={deleteChat.bind(null, chat.id)} />}
+          </div>
         </header>
         <div className="fu-tabs" role="tablist">
           <Link role="tab" aria-selected={tab === "chat"} href={link({ chat: chat.id, q: sp.q })}><MessagesSquare size={14} /> Chat &amp; Dispatch</Link>
@@ -172,6 +216,10 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
     const advisors = people.filter((p) => !/wwbdc|worldwide|service bdc|management/i.test(`${p.name} ${p.email ?? ""}`)).map((p) => p.name as string);
     const recipients = chat.channel === "email" ? people.filter((p) => p.email).length : people.length;
     let lastDay = "";
+    const quoted = sp.reply ? thread.find((m) => m.id === sp.reply) : undefined;
+    const initial = quoted
+      ? `Replying to ${quoted.direction === "outbound" ? "WWBDC" : quoted.sender_name || "Store"}: "${quoted.body.replace(/\s+/g, " ").slice(0, 90)}${quoted.body.length > 90 ? "…" : ""}"\n`
+      : sp.mention ? `@${sp.mention.slice(0, 80)} ` : "";
     return (
       <>
         <div className="fu-thread-wrap"><div>
@@ -191,12 +239,13 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
                     <span className="fu-time">{time(m.created_at)}{m.direction === "outbound" && m.sender_name ? ` · ${m.sender_name}` : ""}</span>
                     {m.status === "failed" && <span className="fu-notsent">Not sent{m.error ? `: ${m.error}` : ""}</span>}
                   </div>
+                  <Link className={`fu-reply ${m.direction}`} href={link({ chat: chat.id, q: sp.q, reply: m.id })}><Reply size={11} /> Reply</Link>
                 </li>
               );
             })}
           </ol>
         </div></div>
-        <Composer channel={CHANNELS[chat.channel as Channel]} recipients={recipients} advisors={advisors} sendMessage={sendReply.bind(null, chat.id)} sendDispatch={sendFollowUp.bind(null, chat.id)} />
+        <Composer key={`${chat.id}-${sp.reply ?? ""}-${sp.mention ?? ""}`} chatId={chat.id} initialText={initial} channel={CHANNELS[chat.channel as Channel]} recipients={recipients} advisors={advisors} sendMessage={sendReply.bind(null, chat.id)} sendDispatch={sendFollowUp.bind(null, chat.id)} />
       </>
     );
   }
@@ -204,14 +253,22 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   function Roster({ chat, people }: { chat: any; people: any[] }) {
     return (
       <div className="fu-roster">
-        <p className="fu-eyebrow">Roster</p>
+        <p className="fu-eyebrow">Roster · {people.length} {people.length === 1 ? "member" : "members"}</p>
         {manager && (
-          <div style={{ marginBottom: 14 }}>
+          <div className="fu-roster-tools">
             <ModalForm button="+ Add member" title="Add a member" note="Email chats send to everyone with an email here." action={addMember.bind(null, chat.id)} submit="Add">
-              <Field label="Name"><input className="x-input" name="name" required /></Field>
-              <Field label="Phone"><input className="x-input" name="phone" type="tel" /></Field>
+              <Field label="Name (optional)"><input className="x-input" name="name" defaultValue="" placeholder="Name" /></Field>
+              <Field label="Phone"><input className="x-input" name="phone" type="tel" placeholder="12223334444" /></Field>
               <Field label="Email"><input className="x-input" name="email" type="email" /></Field>
             </ModalForm>
+            <ModalForm button="+ Bulk add (paste multiple)" title="Bulk add" note="One person per line: name, phone, email. Phone or email can be left out." action={bulkAddMembers.bind(null, chat.id)} submit="Add everyone">
+              <Field label="People"><textarea className="x-input" name="lines" rows={8} placeholder={"Jane Smith, 3055551234, jane@store.com\nMike Lee, 7865550000"} /></Field>
+            </ModalForm>
+            {chat.channel === "whatsapp" && (
+              <ModalForm button="Sync names from WhatsApp" title="Sync names from WhatsApp" note="Renames people on this roster to the names they use in the WhatsApp group, matched by phone number." action={syncWhatsAppNames.bind(null, chat.id)} submit="Sync names">
+                <span />
+              </ModalForm>
+            )}
           </div>
         )}
         {people.length === 0 && <p className="fu-muted">No members yet.</p>}
@@ -219,8 +276,18 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
           {people.map((p) => (
             <li key={p.id}>
               <div><strong>{p.name}</strong><span className="fu-mono fu-muted">{p.phone ?? ""}</span></div>
-              <span className={p.email ? "" : "fu-muted"}>{p.email ?? "No email"}</span>
-              {manager ? <ActionButton label="Remove" confirm={`Remove ${p.name} from this roster?`} action={removeMember.bind(null, chat.id, p.id)} /> : <span />}
+              <span className="fu-email">
+                <span className={p.email ? "" : "fu-muted"}>{p.email ?? "No email"}</span>
+                {manager && (
+                  <ModalForm button={p.email ? "Edit email" : "+ Email"} title={`Email for ${p.name}`} action={setMemberEmail.bind(null, chat.id, p.id)}>
+                    <Field label="Email"><input className="x-input" name="email" type="email" defaultValue={p.email ?? ""} /></Field>
+                  </ModalForm>
+                )}
+              </span>
+              <span className="fu-row-actions">
+                <Link className="fu-mention" href={link({ chat: chat.id, mention: p.name, q: sp.q })}><AtSign size={12} /> Mention</Link>
+                {manager && <ActionButton label="Remove" confirm={`Remove ${p.name} from this roster?`} action={removeMember.bind(null, chat.id, p.id)} />}
+              </span>
             </li>
           ))}
         </ul>
