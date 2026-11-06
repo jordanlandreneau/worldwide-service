@@ -10,7 +10,7 @@ import { db, fetchAll } from "@/lib/data";
 import { addMember, bulkAddMembers, deleteChat, markRead, removeMember, saveChat, sendFollowUp, sendReply, setMemberEmail, syncWhatsAppNames } from "@/lib/follow";
 import { CHANNELS, channelReady } from "@/lib/follow-send";
 import { teamsAccount, teamsConfigured } from "@/lib/follow-providers";
-import { pullTeams } from "@/lib/follow-sync";
+import { pullTeams, pullWhatsApp } from "@/lib/follow-sync";
 
 export const metadata = { title: "Follow-ups · Worldwide Service" };
 
@@ -40,7 +40,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   const view = sp.view === "manage" || sp.view === "analytics" ? sp.view : "dashboard";
   const client = db();
   // Bring in new Teams replies first (at most every 2 minutes).
-  await pullTeams().catch(() => 0);
+  await Promise.all([pullTeams().catch(() => 0), pullWhatsApp().catch(() => 0)]);
   const teams = teamsConfigured() ? await teamsAccount().catch(() => null) : null;
   const [chats, stores, { data: unreadRows }, { data: memberRows }] = await Promise.all([
     fetchAll<any>("follow_chats", "id,name,channel,dealership_id,active,last_activity,whatsapp_group_id,teams_chat_id,google_chat_space,linq_group_id,slack_channel_id", "name"),
