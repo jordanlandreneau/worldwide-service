@@ -16,7 +16,7 @@ import { CHANNEL_NAMES as CHANNELS } from "@/lib/follow-channels";
 
 export function channelReady(channel: Chat["channel"]) {
   if (channel === "email") return !!(process.env.RESEND_API_KEY && (process.env.FOLLOW_UP_EMAIL_FROM || process.env.INVITE_EMAIL_FROM));
-  if (channel === "whatsapp") return !!(process.env.PERISKOPE_API_KEY && process.env.PERISKOPE_PHONE);
+  if (channel === "whatsapp") return !!((process.env.PERISKOPE_API_KEY ?? process.env.PERISKOPE_API) && process.env.PERISKOPE_PHONE);
   return false;
 }
 
@@ -54,7 +54,7 @@ async function email(members: Member[], text: string, subject: string): Promise<
 
 // Periskope sends to WhatsApp groups from the company's WhatsApp number.
 async function whatsapp(chat: Chat, text: string): Promise<Sent> {
-  const key = process.env.PERISKOPE_API_KEY;
+  const key = (process.env.PERISKOPE_API_KEY ?? process.env.PERISKOPE_API);
   const phone = process.env.PERISKOPE_PHONE;
   if (!key || !phone) return { ok: false, error: "WhatsApp isn't connected yet: PERISKOPE_API_KEY and PERISKOPE_PHONE need to be set in Vercel." };
   if (!chat.whatsapp_group_id) return { ok: false, error: "This chat has no WhatsApp group id. Add it in the chat's settings." };
@@ -82,7 +82,7 @@ export function followUpText(f: { customer: string; phone: string; vehicle: stri
 
 // Names from the WhatsApp group itself, through Periskope. Returns phone -> name.
 export async function whatsappNames(groupId: string): Promise<Map<string, string> | string> {
-  const key = process.env.PERISKOPE_API_KEY;
+  const key = (process.env.PERISKOPE_API_KEY ?? process.env.PERISKOPE_API);
   const phone = process.env.PERISKOPE_PHONE;
   if (!key || !phone) return "WhatsApp isn't connected yet, so names can't be synced.";
   try {
