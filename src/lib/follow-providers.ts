@@ -54,7 +54,7 @@ type MsTokens = { refresh: string; access?: string; expires?: number; account?: 
 export const teamsConfigured = () => !!(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET);
 export const teamsRedirect = () => process.env.MICROSOFT_REDIRECT_URI || `${SITE_URL}/api/public/microsoft-auth-callback`;
 const tenant = () => process.env.MICROSOFT_TENANT_ID || "organizations";
-const SCOPES = "offline_access User.Read Chat.ReadWrite ChatMessage.Send";
+const SCOPES = "offline_access User.Read Chat.Read ChatMessage.Send";
 
 export function teamsSignInUrl(state: string) {
   const q = new URLSearchParams({ client_id: process.env.MICROSOFT_CLIENT_ID ?? "", response_type: "code", redirect_uri: teamsRedirect(), response_mode: "query", scope: SCOPES, state, prompt: "select_account" });
