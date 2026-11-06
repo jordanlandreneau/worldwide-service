@@ -2,7 +2,9 @@ import type React from "react";
 import { ActionButton, Field, InlineForm, ModalForm } from "@/components/action-form";
 import { Card, Status, Table } from "@/components/ui";
 import { db } from "@/lib/data";
+import Link from "next/link";
 import { deleteItem, saveGeneral, saveItem } from "@/lib/service-admin";
+import { loadSections } from "@/lib/sections";
 
 export const DATA_TABS = [["general", "General info"], ["pricing", "Pricing"], ["contacts", "Contacts"], ["limitations", "Limitations"], ["announcements", "Announcements"]] as const;
 const SKIP = new Set(["createdAt", "updatedAt", "dealershipId", "id"]);
@@ -36,13 +38,25 @@ export async function ServiceDataEditor({ id, tab }: { id: string; tab: string }
       </Card>
     );
     const noteCells = (r: any) => [<span key="t" className="x-prewrap">{r.text}</span>, r.severity ?? "—", <Status key="s" value={r.active !== false} />];
-    if (tab === "general") body = (
-      <Card title="General Information">
-        <InlineForm action={saveGeneral.bind(null, id)} submit="Save changes">
-          <div className="x-grid-2">{[...new Set([...GENERAL, ...Object.keys(g).filter((k) => !SKIP.has(k))])].map((k) => <div key={k}>{input(`g_${k}`, label(k), g[k])}</div>)}</div>
+    if (tab === "general") {
+      // Grouped like the Service Data page, using the sections admins manage under Stores → Sections.
+      const sections = await loadSections();
+      const placed = new Set(sections.flatMap((x) => x.fields.map((f) => f.key)));
+      const rest = [...new Set([...GENERAL, ...Object.keys(g)])].filter((k) => !SKIP.has(k) && !placed.has(k));
+      const box = (k: string, title: string, long: boolean) => long
+        ? <Field label={title}><textarea className="x-input" style={{ height: 90, padding: 10 }} name={`g_${k}`} defaultValue={g[k] === null || g[k] === undefined ? "" : String(g[k])} /></Field>
+        : input(`g_${k}`, title, g[k]);
+      body = (
+        <InlineForm action={saveGeneral.bind(null, id)} submit="Save changes" extra={<Link className="x-btn" href="/stores/sections" style={{ display: "inline-flex", alignItems: "center" }}>Edit sections and questions</Link>}>
+          {sections.map((x) => (
+            <Card key={x.id} title={x.title}>
+              {x.fields.length === 0 ? <p className="text-sm text-ink-muted">No questions in this section yet.</p> : <div className="x-grid-2">{x.fields.map((f) => <div key={f.key}>{box(f.key, f.label, f.type === "long")}</div>)}</div>}
+            </Card>
+          ))}
+          {rest.length > 0 && <Card title="Other"><div className="x-grid-2">{rest.map((k) => <div key={k}>{box(k, label(k), false)}</div>)}</div></Card>}
         </InlineForm>
-      </Card>
-    );
+      );
+    }
     else if (tab === "pricing") body = editor("pricing", "Pricing", priceFields, ["Service", "Price", "Comments"], (r) => [r.service, r.price === null ? "—" : `$${r.price}`, r.comments ?? "—"]);
     else if (tab === "contacts") body = editor("contacts", "Contacts", contactFields, ["Name", "Title", "Phone", "Email"], (r) => [r.name ?? "—", r.title ?? "—", r.phone ?? "—", r.email ?? "—"]);
     else if (tab === "limitations") body = editor("limitations", "Limitations", (r) => noteFields(r), ["Text", "Severity", "Status"], noteCells);

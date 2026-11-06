@@ -8,6 +8,7 @@ import { StorePicker } from "@/components/store-picker";
 import { External } from "@/components/ui";
 import { requireScoped } from "@/lib/scope";
 import { CREDENTIAL_COLUMNS, type Credential, db, fetchAll } from "@/lib/data";
+import { loadSections } from "@/lib/sections";
 
 export const metadata = { title: "Service Data · Worldwide Service" };
 
@@ -64,10 +65,14 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
   const staff = user.role !== "dealership";
   const { d } = await searchParams;
   const client = db();
-  const [all, { data: dept }] = await Promise.all([
+  const [all, { data: dept }, configured] = await Promise.all([
     fetchAll<any>("dealerships", "id,name,active", "name"),
     client.from("departments").select("id").ilike("name", "service").maybeSingle(),
+    loadSections(),
   ]);
+  // Sections and their questions come from Stores → Sections; the built-in list is only a fallback.
+  const sectionList: [string, string[]][] = configured.length ? configured.map((c) => [c.title, c.fields.map((f) => f.key)]) : SECTIONS;
+  const fieldLabel = new Map(configured.flatMap((c) => c.fields.map((f) => [f.key, f.label] as const)));
   const serviceDept = (dept?.id as string | undefined) ?? null;
   const stores = all.filter((s: any) => s.active !== false && (scope === null || scope.includes(s.id))).map((s: any) => ({ id: s.id as string, name: s.name as string }));
   const id = d && stores.some((s) => s.id === d) ? d : stores[0]?.id;
@@ -82,9 +87,9 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
   const b = (row?.data ?? {}) as any;
   const g: Record<string, unknown> = b.generalInfo ?? {};
   const has = (k: string) => !SKIP.has(k) && g[k] !== null && g[k] !== undefined && g[k] !== "";
-  const placed = new Set(SECTIONS.flatMap(([, keys]) => keys));
+  const placed = new Set(sectionList.flatMap(([, keys]) => keys));
   const other = Object.keys(g).filter((k) => has(k) && !placed.has(k));
-  const groups: [string, string[]][] = [...SECTIONS.map(([t, keys]) => [t, keys.filter(has)] as [string, string[]]), ["Other", other]].filter(([, keys]) => keys.length) as [string, string[]][];
+  const groups: [string, string[]][] = [...sectionList.map(([t, keys]) => [t, keys.filter(has)] as [string, string[]]), ["Other", other]].filter(([, keys]) => keys.length) as [string, string[]][];
   const notes = [...new Map([...(b.announcements ?? []), ...(b.limitations ?? [])].filter((n: any) => n.active !== false).map((n: any) => [String(n.text).trim().toUpperCase(), n])).values()] as any[];
   const hours = (b.hours ?? []).map((h: any) => ({ department: h.departmentName, day: h.dayOfWeek, closed: h.closed, open: h.openTime, close: h.closeTime }));
   const logins = (creds ?? []) as Credential[];
@@ -95,6 +100,7 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
   const empty = !groups.length && !notes.length && !hours.length && !(b.pricing ?? []).length && !(b.contacts ?? []).length;
 
   const nav: { id: string; label: string; alert?: boolean }[] = [
+    ...(address ? [{ id: "map", label: "Map" }] : []),
     ...(notes.length || store?.special_note ? [{ id: "important", label: "Important", alert: true }] : []),
     ...(logins.length ? [{ id: "logins", label: "Logins" }] : []),
     { id: "hours", label: "Hours" },
@@ -135,6 +141,18 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
         </aside>
 
         <div className="svc-content">
+          {address && (
+            <section id="map" className="svc-map" aria-label={`Map of ${name}`}>
+              <iframe title={`Map of ${name}`} src={`https://maps.google.com/maps?q=${encodeURIComponent(`${name}, ${address}`)}&z=15&output=embed`} loading="lazy" referrerPolicy="no-referrer-when-downgrade" allowFullScreen />
+              <div className="svc-map-bar">
+                <span>{address}</span>
+                <span style={{ display: "flex", gap: 16 }}>
+                  <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${name}, ${address}`)}`} target="_blank" rel="noopener noreferrer">Open in Google Maps</a>
+                  <a href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${name}, ${address}`)}`} target="_blank" rel="noopener noreferrer">Directions</a>
+                </span>
+              </div>
+            </section>
+          )}
           {empty && <section className="svc-section"><div className="svc-section-body"><p className="svc-empty">No Service Data has been entered for this store yet.{user.role === "admin" ? " Use Edit Service Data to add it." : ""}</p></div></section>}
           {(notes.length > 0 || store?.special_note) && (
             <Section id="important" title="Important" alert>
@@ -148,7 +166,7 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
           </Section>
           {groups.map(([title, keys]) => (
             <Section key={title} id={slug(title)} title={title}>
-              <Facts items={keys.map((k) => [label(k), <Answer key={k} k={k} value={g[k]} />])} />
+              <Facts items={keys.map((k) => [fieldLabel.get(k) ?? label(k), <Answer key={k} k={k} value={g[k]} />])} />
             </Section>
           ))}
           <Section id="pricing" title="Pricing">

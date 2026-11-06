@@ -22,7 +22,7 @@ export default async function Stores({ searchParams }: { searchParams: Promise<{
   const term = q.trim().toLowerCase();
   const shown = stores.filter((s: any) => !term || s.name.toLowerCase().includes(term));
   return (
-    <Page title="Stores" subtitle={`${shown.length} shown · ${stores.length} Service stores`} actions={<Link href="/stores/new" className="x-btn x-btn-primary" style={{ display: "inline-flex", alignItems: "center" }}>+ New store</Link>}>
+    <Page title="Stores" subtitle={`${shown.length} shown · ${stores.length} Service stores`} actions={<><Link href="/stores/sections" className="x-btn" style={{ display: "inline-flex", alignItems: "center" }}>Service Data sections</Link><Link href="/stores/new" className="x-btn x-btn-primary" style={{ display: "inline-flex", alignItems: "center" }}>+ New store</Link></>}>
       <Card>
         <form className="x-filters">
           <input className="x-input" name="q" defaultValue={q} placeholder="Store name" aria-label="Search stores" />
