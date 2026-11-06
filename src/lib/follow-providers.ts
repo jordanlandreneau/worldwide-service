@@ -138,17 +138,22 @@ let gToken: { value: string; until: number } | null = null;
 
 async function googleAccess() {
   if (gToken && gToken.until > Date.now() + 60_000) return gToken.value;
-  const sa = JSON.parse(process.env.GOOGLE_CHAT_SERVICE_ACCOUNT_JSON ?? "{}");
+  const raw = (process.env.GOOGLE_CHAT_SERVICE_ACCOUNT_JSON ?? "").trim();
+  let sa: any;
+  try { sa = JSON.parse(raw.startsWith("{") ? raw : Buffer.from(raw, "base64").toString("utf8")); } catch { throw new Error("GOOGLE_CHAT_SERVICE_ACCOUNT_JSON isn't valid JSON (paste the whole key file, starting with {)"); }
+  if (typeof sa === "string") sa = JSON.parse(sa);
+  if (!sa.client_email || !sa.private_key) throw new Error("The key file is missing client_email or private_key");
   const now = Math.floor(Date.now() / 1000);
   const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
   const unsigned = `${b64({ alg: "RS256", typ: "JWT" })}.${b64({ iss: sa.client_email, scope: "https://www.googleapis.com/auth/chat.bot", aud: "https://oauth2.googleapis.com/token", iat: now, exp: now + 3600 })}`;
-  const sig = createSign("RSA-SHA256").update(unsigned).sign(String(sa.private_key ?? "").replace(/\\n/g, "\n")).toString("base64url");
+  let sig: string;
+  try { sig = createSign("RSA-SHA256").update(unsigned).sign(String(sa.private_key ?? "").replace(/\\n/g, "\n")).toString("base64url"); } catch { throw new Error("The private_key in the key file couldn't be read"); }
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: `${unsigned}.${sig}` }),
   });
   const body = (await res.json().catch(() => ({}))) as any;
-  if (!body.access_token) throw new Error("google token");
+  if (!body.access_token) throw new Error(`Google refused the key: ${body.error_description ?? body.error ?? res.status}`);
   gToken = { value: body.access_token, until: Date.now() + (body.expires_in ?? 3600) * 1000 };
   return gToken.value;
 }
@@ -212,7 +217,7 @@ export async function checkConnections(sample: { whatsapp?: string | null; linq?
   await run("Google Chat", async () => {
     if (!googleChatReady()) return { ok: false, detail: "GOOGLE_CHAT_SERVICE_ACCOUNT_JSON is missing" };
     let token: string;
-    try { token = await googleAccess(); } catch { return { ok: false, detail: "Google didn't accept the service account key (check the JSON)" }; }
+    try { token = await googleAccess(); } catch (e) { return { ok: false, detail: e instanceof Error ? e.message : "Google didn't accept the service account key" }; }
     if (!sample.space) return { ok: true, detail: "Service account works" };
     const res = await fetch(`https://chat.googleapis.com/v1/${sample.space}`, { headers: { Authorization: `Bearer ${token}` } });
     const body = res.ok ? ((await res.json().catch(() => ({}))) as any) : null;
