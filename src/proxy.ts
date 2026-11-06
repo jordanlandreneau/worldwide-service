@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { OLD_HOSTS, SITE_URL } from "@/lib/site";
 
-const PUBLIC = ["/login", "/auth/callback", "/auth/accept", "/forgot-password", "/no-access"];
+const PUBLIC = ["/api/hooks", "/login", "/auth/callback", "/auth/accept", "/forgot-password", "/no-access"];
 
 export async function proxy(request: NextRequest) {
   // Send the old Vercel address to service.worldwide-home.com, keeping the page.

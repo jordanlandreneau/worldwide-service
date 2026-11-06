@@ -2,7 +2,7 @@
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, BarChart3, Inbox, Building2, History, ListOrdered, Timer, UserCog, BookOpen, CalendarClock, CalendarPlus, Car, CarFront, CircleHelp, ClipboardCheck, ClipboardList, Gauge, GraduationCap, Info, KeyRound, Library, LogOut, Megaphone, Menu, MessageSquare, MessagesSquare, PanelLeftClose, PanelLeftOpen, Phone, PhoneCall, ScrollText, SlidersHorizontal, Store, Tags, Trophy, Upload, UserCheck, Users, UsersRound } from "lucide-react";
+import { Activity, BarChart3, Inbox, Building2, History, ListOrdered, Timer, UserCog, BookOpen, CalendarClock, CalendarPlus, Car, CarFront, CircleHelp, ClipboardCheck, ClipboardList, Gauge, GraduationCap, Info, KeyRound, Library, LogOut, Megaphone, Menu, MessageSquare, MessagesSquare, PanelLeftClose, PanelLeftOpen, Phone, PhoneCall, ScrollText, SlidersHorizontal, Store, Tags, Trophy, Upload, UserCheck, Users, UsersRound, Send } from "lucide-react";
 import { Clocks, TopSearch } from "@/components/top-tools";
 import type { Role } from "@/lib/access";
 
@@ -15,6 +15,7 @@ const GROUPS: { label: string; items: { label: string; href: string; icon: typeo
     { label: "Service Data", href: "/service/info", icon: CircleHelp, min: "dealership" },
     { label: "Appointments", href: "/appointments", icon: CalendarClock, min: "dealership" },
     { label: "Appointment Report", href: "/reports/appointments", icon: BarChart3, min: "manager" },
+    { label: "Follow-ups", href: "/follow-up", icon: Send, min: "agent" },
     { label: "Codes", href: "/codes", icon: KeyRound, min: "agent" },
     { label: "Request a change", href: "/requests", icon: MessageSquare, min: "dealership", not: "agent" },
   ] },

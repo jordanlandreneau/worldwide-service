@@ -627,3 +627,13 @@ span.cc-wave { cursor: default; }
 .svc-main .x-stat span { letter-spacing: .1em; text-transform: uppercase; font-size: 12px; color: var(--brooklyn); }
 .svc-main .x-tab { border-radius: var(--radius); }
 .svc-main .x-tab[data-on="true"] { background: var(--sapphire); color: #fff; }
+
+/* Follow-up chat thread */
+.fu-thread { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; max-height: 560px; overflow-y: auto; }
+.fu-msg { max-width: min(640px, 92%); padding: 10px 12px; border-radius: 3px; border: 1px solid var(--border, #d9dde3); background: #fff; }
+.fu-msg.outbound { align-self: flex-end; background: #eef3fb; border-color: #c9d7ee; }
+.fu-msg.inbound.unread { border-left: 3px solid #1f5fbf; }
+.fu-msg p { margin: 4px 0 0; font-size: 14px; line-height: 1.45; }
+.fu-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: 12px; color: #5b6472; }
+.fu-meta strong { color: #10161f; font-size: 13px; }
+.fu-failed { color: #b42318; font-weight: 600; }
