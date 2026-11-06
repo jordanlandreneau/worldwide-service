@@ -829,3 +829,4 @@ span.cc-wave { cursor: default; }
 }
 .fu-conn-btn { display: block; margin-top: 8px; text-align: center; padding: 7px 10px; border-radius: 6px; background: var(--fu-green); color: #fff !important; font-weight: 600; }
 .fu-conn-note { display: block; margin-top: 6px; color: var(--fu-ink); }
+.fu-check { display: block; margin-top: 8px; font-size: 12px; color: var(--fu-muted) !important; text-decoration: underline !important; padding: 0 6px; }

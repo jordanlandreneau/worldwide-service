@@ -165,3 +165,60 @@ export async function googleChatSend(space: string | null, text: string): Promis
   const body = (await res.json().catch(() => ({}))) as any;
   return { ok: true, externalId: body.name };
 }
+
+// ---------- Read-only connection checks (nothing is sent) ----------
+export type Check = { channel: string; ok: boolean; detail: string };
+const status = async (res: Response) => `${res.status}${res.ok ? "" : ` ${(await res.text().catch(() => "")).slice(0, 160)}`}`;
+
+export async function checkConnections(sample: { whatsapp?: string | null; linq?: string | null; teams?: string | null; space?: string | null }): Promise<Check[]> {
+  const out: Check[] = [];
+  const run = async (channel: string, fn: () => Promise<{ ok: boolean; detail: string }>) => {
+    try { out.push({ channel, ...(await fn()) }); } catch (e) { out.push({ channel, ok: false, detail: e instanceof Error ? e.message : "failed" }); }
+  };
+  await run("Email (Resend)", async () => {
+    const key = process.env.RESEND_API_KEY;
+    if (!key) return { ok: false, detail: "RESEND_API_KEY is missing" };
+    const res = await fetch("https://api.resend.com/domains", { headers: { Authorization: `Bearer ${key}` } });
+    if (res.status === 401 && (await res.text()).includes("restricted")) return { ok: true, detail: "Key works (sending-only key)" };
+    return { ok: res.ok, detail: res.ok ? "Key works" : `Resend answered ${await status(res)}` };
+  });
+  await run("WhatsApp (Periskope)", async () => {
+    const key = process.env.PERISKOPE_API_KEY ?? process.env.PERISKOPE_API;
+    const phone = process.env.PERISKOPE_PHONE;
+    if (!key || !phone) return { ok: false, detail: "PERISKOPE_API or PERISKOPE_PHONE is missing" };
+    if (!sample.whatsapp) return { ok: false, detail: "No WhatsApp chat with a group id to test against" };
+    const res = await fetch(`https://api.periskope.app/v1/chats/${encodeURIComponent(sample.whatsapp)}`, { headers: { Authorization: `Bearer ${key}`, "x-phone": phone } });
+    const body = res.ok ? ((await res.json().catch(() => ({}))) as any) : null;
+    return { ok: res.ok, detail: res.ok ? `Key works; read group "${body?.chat_name ?? body?.chat?.chat_name ?? sample.whatsapp}"` : `Periskope answered ${await status(res)}` };
+  });
+  await run("Text (Linq)", async () => {
+    const token = process.env.LINQ_API_TOKEN;
+    if (!token) return { ok: false, detail: "LINQ_API_TOKEN is missing" };
+    const url = sample.linq ? `https://api.linqapp.com/api/partner/v3/chats/${encodeURIComponent(sample.linq)}` : "https://api.linqapp.com/api/partner/v3/chats?limit=1";
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    return { ok: res.ok, detail: res.ok ? "Token works; read a text group" : `Linq answered ${await status(res)}` };
+  });
+  await run("Microsoft Teams", async () => {
+    if (!teamsConfigured()) return { ok: false, detail: "Microsoft keys are missing" };
+    const token = await teamsAccess();
+    if (!token) return { ok: false, detail: "Not signed in yet: click Connect Teams" };
+    const me = await fetch("https://graph.microsoft.com/v1.0/me", { headers: { Authorization: `Bearer ${token}` } });
+    if (!me.ok) return { ok: false, detail: `Microsoft answered ${await status(me)}` };
+    const who = ((await me.json()) as any).userPrincipalName;
+    if (!sample.teams) return { ok: true, detail: `Signed in as ${who}` };
+    const res = await fetch(`https://graph.microsoft.com/v1.0/chats/${encodeURIComponent(sample.teams)}/messages?$top=1`, { headers: { Authorization: `Bearer ${token}` } });
+    return { ok: res.ok, detail: res.ok ? `Signed in as ${who}; can read the dealer chats` : `Signed in as ${who}, but reading a chat failed: ${await status(res)}` };
+  });
+  await run("Google Chat", async () => {
+    if (!googleChatReady()) return { ok: false, detail: "GOOGLE_CHAT_SERVICE_ACCOUNT_JSON is missing" };
+    let token: string;
+    try { token = await googleAccess(); } catch { return { ok: false, detail: "Google didn't accept the service account key (check the JSON)" }; }
+    if (!sample.space) return { ok: true, detail: "Service account works" };
+    const res = await fetch(`https://chat.googleapis.com/v1/${sample.space}`, { headers: { Authorization: `Bearer ${token}` } });
+    const body = res.ok ? ((await res.json().catch(() => ({}))) as any) : null;
+    const replies = process.env.GOOGLE_CHAT_PROJECT_NUMBER ? "" : " (GOOGLE_CHAT_PROJECT_NUMBER missing, so replies can't be checked)";
+    return { ok: res.ok, detail: res.ok ? `Service account works; the app can see "${body?.displayName ?? sample.space}"${replies}` : `Google answered ${await status(res)}` };
+  });
+  out.push({ channel: "Replies (webhook key)", ok: !!process.env.FOLLOW_UP_WEBHOOK_KEY, detail: process.env.FOLLOW_UP_WEBHOOK_KEY ? "FOLLOW_UP_WEBHOOK_KEY is set" : "FOLLOW_UP_WEBHOOK_KEY is missing, so WhatsApp and text replies are refused" });
+  return out;
+}

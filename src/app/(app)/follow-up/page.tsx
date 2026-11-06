@@ -102,6 +102,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
             <a className="fu-conn-btn" href="/api/public/microsoft-auth-start">Connect Teams</a>
           </div>
         )}
+        {manager && <Link className="fu-check" href="/follow-up/check">Check connections</Link>}
         <div className="fu-user">
           <span className="fu-avatar">{initials}</span>
           <div><strong>{user.name}</strong><span>{roleName}</span></div>
