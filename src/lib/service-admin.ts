@@ -32,7 +32,7 @@ async function store(email: string, id: string, data: Record<string, any>, actio
 }
 
 export async function saveGeneral(id: string, _: Result, f: FormData): Promise<Result> {
-  const user = await requireUser("admin");
+  const user = await requireUser("manager");
   const data = await load(id);
   if (!data) return { error: "This dealership no longer exists." };
   const general = { ...(data.generalInfo ?? {}) };
@@ -45,7 +45,7 @@ export async function saveGeneral(id: string, _: Result, f: FormData): Promise<R
 }
 
 export async function saveItem(id: string, list: string, itemId: string | null, _: Result, f: FormData): Promise<Result> {
-  const user = await requireUser("admin");
+  const user = await requireUser("manager");
   const fields = LISTS[list];
   if (!fields) return { error: "Unknown list." };
   const data = await load(id);
@@ -78,7 +78,7 @@ export async function saveItem(id: string, list: string, itemId: string | null, 
 }
 
 export async function deleteItem(id: string, list: string, itemId: string) {
-  const user = await requireUser("admin");
+  const user = await requireUser("manager");
   if (!LISTS[list]) return;
   const data = await load(id);
   if (!data) return;
@@ -91,7 +91,7 @@ export async function deleteItem(id: string, list: string, itemId: string) {
 const UUIDISH = /^[0-9a-z-]{8,40}$/i;
 
 export async function setSectionHidden(id: string, sectionId: string, hidden: boolean) {
-  const user = await requireUser("admin");
+  const user = await requireUser("manager");
   if (!UUIDISH.test(sectionId)) return;
   const data = await load(id);
   if (!data) return;
@@ -101,7 +101,7 @@ export async function setSectionHidden(id: string, sectionId: string, hidden: bo
 }
 
 export async function saveStoreSection(id: string, sectionId: string | null, _: Result, f: FormData): Promise<Result> {
-  const user = await requireUser("admin");
+  const user = await requireUser("manager");
   const data = await load(id);
   if (!data) return { error: "This dealership no longer exists." };
   let raw: any;
@@ -118,14 +118,14 @@ export async function saveStoreSection(id: string, sectionId: string | null, _: 
 }
 
 export async function deleteStoreSection(id: string, sectionId: string) {
-  const user = await requireUser("admin");
+  const user = await requireUser("manager");
   const data = await load(id);
   if (!data) return;
   await store(user.email, id, { ...data, storeSections: (data.storeSections ?? []).filter((s: any) => s.id !== sectionId) }, "delete store section");
 }
 
 export async function moveStoreSection(id: string, sectionId: string, dir: -1 | 1) {
-  const user = await requireUser("admin");
+  const user = await requireUser("manager");
   const data = await load(id);
   if (!data) return;
   const list = [...(data.storeSections ?? [])];

@@ -1129,3 +1129,21 @@ span.cc-wave { cursor: default; }
 .svc-login li { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 10px; align-items: center; flex-wrap: nowrap; }
 .svc-login li .svc-secret { min-width: 0; overflow-wrap: anywhere; }
 .svc-login .svc-actions { display: inline-flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }
+
+/* Editing the Service Data page in place (managers and admins) */
+.svc-edit-toggle { display: block; margin-top: 14px; text-align: center; font-size: 13.5px; font-weight: 600; padding: 9px 12px; border-radius: var(--radius, 4px); background: var(--portimao, #1c69d4); color: #fff !important; text-decoration: none; }
+.svc-edit-toggle.on { background: #15803d; }
+.svc-editing-note { position: sticky; top: 8px; z-index: 5; background: #fff8e6; border: 1px solid #f3d39c; color: #6b4300; border-radius: 6px; padding: 10px 14px; font-size: 14px; margin-bottom: 14px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: space-between; }
+.svc-editing-note a { font-weight: 600; color: #6b4300; }
+.svc-editbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; margin: 0 0 14px; background: #f4f6fa; border: 1px dashed #c9d2e0; border-radius: 6px; }
+.svc-edit-tag { font-size: 12px; color: #475467; margin-right: auto; }
+.svc-edit-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0 18px; }
+.svc-edit-box { width: 100%; min-height: 38px; padding: 8px 10px; resize: vertical; font: inherit; line-height: 1.4; height: auto; }
+.svc-hidden .svc-section-head, .svc-hidden .svc-section-body > :not(.svc-editbar) { opacity: .55; }
+.svc-hidden-tag { display: inline-block; margin-left: 10px; font-size: 12px; font-stretch: normal; color: #b42318; vertical-align: middle; }
+.svc-edit-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.svc-edit-list li { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid #eef0f3; }
+.svc-edit-list li[data-off="true"] { opacity: .55; }
+.svc-edit-details { margin-top: 14px; border-top: 1px dashed #c9d2e0; padding-top: 10px; }
+.svc-edit-details > summary { cursor: pointer; font-weight: 600; color: var(--portimao, #1c69d4); }
+.svc-add-section { border: 2px dashed #c9d2e0; }

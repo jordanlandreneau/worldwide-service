@@ -28,7 +28,7 @@ function FieldForm({ f, unplaced }: { f?: SectionField; unplaced?: string[] }) {
 
 // Admins add, rename, reorder and remove the sections and fields on every store's Service Data page.
 export default async function Sections() {
-  await requireUser("admin");
+  await requireUser("manager");
   const [sections, profiles] = await Promise.all([loadSections(), fetchAll<any>("service_profiles", "data", "dealership_id")]);
   const placed = new Set(sections.flatMap((s) => s.fields.map((x) => x.key)));
   const answered = new Set<string>();

@@ -23,7 +23,7 @@ async function find(id: string): Promise<Section | null> {
 }
 
 export async function saveSection(id: string | null, _: Result, f: FormData): Promise<Result> {
-  const user = await requireUser("admin");
+  const user = await requireUser("manager");
   const title = text(f, "title");
   if (!title) return { error: "Enter the section's name." };
   const client = db();
@@ -43,7 +43,7 @@ export async function saveSection(id: string | null, _: Result, f: FormData): Pr
 }
 
 export async function deleteSection(id: string) {
-  const user = await requireUser("admin");
+  const user = await requireUser("manager");
   if (!UUID.test(id)) return;
   // The stores' answers stay saved; the fields just show under "Other" until placed in another section.
   await db().from("service_sections").delete().eq("id", id);
@@ -52,7 +52,7 @@ export async function deleteSection(id: string) {
 }
 
 export async function moveSection(id: string, dir: -1 | 1) {
-  await requireUser("admin");
+  await requireUser("manager");
   const all = await loadSections();
   const i = all.findIndex((s) => s.id === id);
   const j = i + dir;
@@ -63,7 +63,7 @@ export async function moveSection(id: string, dir: -1 | 1) {
 }
 
 export async function saveField(sectionId: string, key: string | null, _: Result, f: FormData): Promise<Result> {
-  const user = await requireUser("admin");
+  const user = await requireUser("manager");
   const section = await find(sectionId);
   if (!section) return { error: "This section no longer exists." };
   const label = text(f, "label");
@@ -89,7 +89,7 @@ export async function saveField(sectionId: string, key: string | null, _: Result
 }
 
 export async function removeField(sectionId: string, key: string) {
-  const user = await requireUser("admin");
+  const user = await requireUser("manager");
   const section = await find(sectionId);
   if (!section) return;
   await setFields(sectionId, section.fields.filter((x) => x.key !== key));
@@ -98,7 +98,7 @@ export async function removeField(sectionId: string, key: string) {
 }
 
 export async function moveField(sectionId: string, key: string, dir: -1 | 1) {
-  await requireUser("admin");
+  await requireUser("manager");
   const section = await find(sectionId);
   if (!section) return;
   const fields = [...section.fields];
@@ -111,7 +111,7 @@ export async function moveField(sectionId: string, key: string, dir: -1 | 1) {
 }
 
 export async function moveFieldTo(sectionId: string, key: string, _: Result, f: FormData): Promise<Result> {
-  const user = await requireUser("admin");
+  const user = await requireUser("manager");
   const target = text(f, "target", 64);
   const all = await loadSections();
   const from = all.find((s) => s.id === sectionId);
