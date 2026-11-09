@@ -1047,3 +1047,7 @@ span.cc-wave { cursor: default; }
 .sa-list li .sa-note { color: var(--ink-muted); font-size: 13px; }
 .sa-list li form, .sa-list li > :last-child { margin-left: auto; }
 .fu-toast[data-ch="event"] { border-left-color: #a45200; background: #fffaf2; }
+.cd-line { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 360px); gap: 14px; align-items: end; padding: 10px 0; border-bottom: 1px solid var(--border-subtle); }
+.cd-line small { display: block; color: var(--ink-muted); font-size: 13px; }
+.cd-line form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+@media (max-width: 720px) { .cd-line { grid-template-columns: 1fr; } }

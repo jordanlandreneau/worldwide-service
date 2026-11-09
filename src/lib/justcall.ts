@@ -74,12 +74,17 @@ export async function syncCodes(): Promise<{ added: number; skipped?: boolean; e
   await client.from("justcall_sync").upsert({ name: "codes", last_sms_id: state?.last_sms_id ?? 0, synced_at: new Date().toISOString() });
   // Codes are only kept for 24 hours. This runs even if JustCall is unreachable.
   await client.from("verification_codes").delete().lt("sms_at", codeCutoff());
-  const lastId = Number(state?.last_sms_id ?? 0);
+  // One time after codes started coming through for every line: re-read the last day of texts,
+  // so codes skipped earlier on lines without a store show up too.
+  const { data: rescan } = await client.from("justcall_sync").select("name").eq("name", "codes-all-lines-v1").maybeSingle();
+  if (!rescan) await client.from("justcall_sync").upsert({ name: "codes-all-lines-v1", last_sms_id: 0, synced_at: new Date().toISOString() });
+  const lastId = rescan ? Number(state?.last_sms_id ?? 0) : 0;
+  const pages = rescan ? MAX_PAGES : 10;
   let newest = lastId;
   let added = 0;
   try {
     const { owners, senders } = await dealershipLines();
-    for (let page = 0; page < MAX_PAGES; page++) {
+    for (let page = 0; page < pages; page++) {
       const res = await justcall(`/texts?sms_direction=incoming&sort=id&order=desc&per_page=100&page=${page}`, undefined, 0);
       if (!res.ok) {
         // Wait before asking again, so Codes doesn't add to a rate limit shared with 3.0.
@@ -99,13 +104,16 @@ export async function syncCodes(): Promise<{ added: number; skipped?: boolean; e
         const both = byLine && bySender ? new Set([...byLine].filter((x) => bySender.has(x))) : null;
         const line = both?.size ? both : byLine?.size === 1 ? byLine : bySender ?? byLine;
         const body = String(sms.sms_info?.body ?? "");
-        const code = line ? extractCode(body) : null;
+        // Every code in the JustCall inbox comes through. Codes on a line no store has yet show as
+        // "not linked" on Codes, where an admin can link the line to its store.
+        const code = extractCode(body);
         const when = `${sms.sms_date ?? ""}T${sms.sms_time ?? "00:00:00"}Z`;
-        if (!line || !code || Date.parse(when) < Date.now() - KEEP_MS) continue;
+        if (Date.parse(when) < Date.now() - KEEP_MS) { reachedKnown = true; continue; }
+        if (!code) continue;
         rows.push({
           justcall_sms_id: id, code, body, contact_number: sms.contact_number ?? null, contact_name: sms.contact_name ?? null,
           justcall_number: sms.justcall_number ?? null, line_name: sms.justcall_line_name ?? null,
-          dealership_id: line.size === 1 ? [...line][0] : null,
+          dealership_id: line?.size === 1 ? [...line][0] : null,
           sms_at: Number.isNaN(Date.parse(when)) ? new Date().toISOString() : when,
         });
       }
