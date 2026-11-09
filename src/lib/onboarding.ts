@@ -151,7 +151,7 @@ export async function importOnboarding(f: Form): Promise<{ ok: true; storeId: st
   const newContacts = contacts.filter((c) => !haveContact.has(`${String(c.name ?? "").toLowerCase()}|${String(c.phone ?? "").replace(/\D/g, "")}`));
   const haveLimit = new Set(((data.limitations ?? []) as any[]).map((l) => String(l.text ?? "").trim()));
   const newLimits = limitations.filter((l) => !haveLimit.has(String(l.text)));
-  const next = { ...data, generalInfo: g, contacts: [...(data.contacts ?? []), ...newContacts], limitations: [...(data.limitations ?? []), ...newLimits], onboarding: { submittedAt: now, sourceId, by: str(f.sm_email) || null } };
+  const next = { ...data, generalInfo: g, contacts: [...(data.contacts ?? []), ...newContacts], limitations: [...(data.limitations ?? []), ...newLimits], onboarding: { submittedAt: str(f.created_at) && !Number.isNaN(Date.parse(str(f.created_at))) ? new Date(str(f.created_at)).toISOString() : now, sourceId, by: str(f.sm_email) || null } };
   const { error: pe } = await client.from("service_profiles").upsert({ dealership_id: storeId, data: next });
   if (pe) return { error: "couldn't save the Service Data" };
 

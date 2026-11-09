@@ -11,7 +11,7 @@ export type Agent = { id: string; name: string; email: string; team: string | nu
 export async function serviceAgents(): Promise<Agent[]> {
   const { data } = await db().from("app_users").select("id,first_name,last_name,email,team_name,role,status").in("role", ["agent", "manager", "admin"]).neq("status", "disabled");
   return ((data ?? []) as any[])
-    .filter((x) => x.role === "admin" || isServiceTeam(x.team_name))
+    .filter((x) => isServiceTeam(x.team_name))
     .map((x) => ({ id: x.id, email: String(x.email).toLowerCase(), team: x.team_name ?? null, name: [x.first_name, x.last_name].filter(Boolean).join(" ") || x.email }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
