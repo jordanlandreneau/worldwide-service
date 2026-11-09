@@ -105,7 +105,7 @@ export default async function WorkList({ params, searchParams }: { params: Promi
                 })}
               </dl>
               <form action={markRow.bind(null, id, i)} className="wl-act">
-                {p && <p className="wl-last"><span className="cc-badge" data-tone={o?.tone ?? "slate"}>{o?.label ?? p.status}</span> {p.user_name ?? ""} · {when(p.updated_at)}{p.note ? <em> “{p.note}”</em> : null}</p>}
+                {p && <p className="wl-last"><span className="cc-badge" data-tone={o?.tone ?? "slate"}>{o?.label ?? p.status.replace(/_/g, " ").toUpperCase()}</span> {p.user_name ?? ""} · {when(p.updated_at)}{p.note ? <em> “{p.note}”</em> : null}</p>}
                 <input className="x-input" name="note" placeholder="Note (optional)" defaultValue="" maxLength={1000} />
                 <div className="wl-buttons">
                   {OUTCOMES.map((x) => <button key={x.value} name="status" value={x.value} className="wl-out" data-tone={x.tone}>{x.label}</button>)}
