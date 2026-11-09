@@ -3,7 +3,8 @@ import { ActionButton, Field, InlineForm, ModalForm } from "@/components/action-
 import { Card, Status, Table } from "@/components/ui";
 import { db } from "@/lib/data";
 import Link from "next/link";
-import { deleteItem, saveGeneral, saveItem } from "@/lib/service-admin";
+import { deleteItem, deleteStoreSection, moveStoreSection, saveGeneral, saveItem, saveStoreSection, setSectionHidden } from "@/lib/service-admin";
+import { StoreSectionForm } from "@/components/store-section-form";
 import { loadSections } from "@/lib/sections";
 
 export const DATA_TABS = [["general", "General info"], ["pricing", "Pricing"], ["contacts", "Contacts"], ["limitations", "Limitations"], ["announcements", "Announcements"]] as const;
@@ -39,22 +40,51 @@ export async function ServiceDataEditor({ id, tab }: { id: string; tab: string }
     );
     const noteCells = (r: any) => [<span key="t" className="x-prewrap">{r.text}</span>, r.severity ?? "—", <Status key="s" value={r.active !== false} />];
     if (tab === "general") {
-      // Grouped like the Service Data page, using the sections admins manage under Stores → Sections.
+      // Grouped like the Service Data page. Standard sections come from Stores → Service Data sections;
+      // each store can hide any of them and add sections only it has.
       const sections = await loadSections();
+      const hidden = new Set<string>(p.hiddenSections ?? []);
+      const own = (p.storeSections ?? []) as { id: string; title: string; rows: { label: string; value: string }[] }[];
       const placed = new Set(sections.flatMap((x) => x.fields.map((f) => f.key)));
       const rest = [...new Set([...GENERAL, ...Object.keys(g)])].filter((k) => !SKIP.has(k) && !placed.has(k));
+      const shown = sections.filter((x) => !hidden.has(x.id));
       const box = (k: string, title: string, long: boolean) => long
-        ? <Field label={title}><textarea className="x-input" style={{ height: 90, padding: 10 }} name={`g_${k}`} defaultValue={g[k] === null || g[k] === undefined ? "" : String(g[k])} /></Field>
+        ? <Field label={title}><textarea className="x-input" style={{ height: 90, padding: 10, width: "100%" }} name={`g_${k}`} defaultValue={g[k] === null || g[k] === undefined ? "" : String(g[k])} /></Field>
         : input(`g_${k}`, title, g[k]);
       body = (
-        <InlineForm action={saveGeneral.bind(null, id)} submit="Save changes" extra={<Link className="x-btn" href="/stores/sections" style={{ display: "inline-flex", alignItems: "center" }}>Edit sections and questions</Link>}>
-          {sections.map((x) => (
-            <Card key={x.id} title={x.title}>
-              {x.fields.length === 0 ? <p className="text-sm text-ink-muted">No questions in this section yet.</p> : <div className="x-grid-2">{x.fields.map((f) => <div key={f.key}>{box(f.key, f.label, f.type === "long")}</div>)}</div>}
-            </Card>
-          ))}
-          {rest.length > 0 && <Card title="Other"><div className="x-grid-2">{rest.map((k) => <div key={k}>{box(k, label(k), false)}</div>)}</div></Card>}
-        </InlineForm>
+        <>
+          <Card title="Sections on this store's page" note="Turn sections on or off for this store only, or add a section just for this store.">
+            <ul className="ss-list">
+              {sections.map((x) => (
+                <li key={x.id} className={hidden.has(x.id) ? "off" : ""}>
+                  <span className="ss-name"><strong>{x.title}</strong><small>{hidden.has(x.id) ? "Hidden on this store" : `Shown · ${x.fields.length} questions`}</small></span>
+                  <ActionButton label={hidden.has(x.id) ? "Show it" : "Hide for this store"} action={setSectionHidden.bind(null, id, x.id, !hidden.has(x.id))} />
+                </li>
+              ))}
+              {own.map((x, i) => (
+                <li key={x.id} className="own">
+                  <span className="ss-name"><strong>{x.title}</strong><small>Only this store · {x.rows.length} {x.rows.length === 1 ? "row" : "rows"}</small></span>
+                  <span className="x-filters">
+                    {i > 0 && <ActionButton label="↑" action={moveStoreSection.bind(null, id, x.id, -1)} />}
+                    {i < own.length - 1 && <ActionButton label="↓" action={moveStoreSection.bind(null, id, x.id, 1)} />}
+                    <ActionButton label="Delete" confirm={`Delete "${x.title}" from this store's page?`} action={deleteStoreSection.bind(null, id, x.id)} />
+                  </span>
+                  <details className="ss-edit"><summary>Edit</summary><StoreSectionForm action={saveStoreSection.bind(null, id, x.id)} initial={{ title: x.title, rows: x.rows }} /></details>
+                </li>
+              ))}
+            </ul>
+            <details className="ss-add"><summary>+ Add a section just for this store</summary><StoreSectionForm action={saveStoreSection.bind(null, id, null)} /></details>
+            <p className="text-sm text-ink-muted" style={{ marginTop: 10 }}>To change a section or its questions for every store, use <Link className="text-accent" href="/stores/sections">Service Data sections</Link>.</p>
+          </Card>
+          <InlineForm action={saveGeneral.bind(null, id)} submit="Save answers">
+            {shown.map((x) => (
+              <Card key={x.id} title={x.title}>
+                {x.fields.length === 0 ? <p className="text-sm text-ink-muted">No questions in this section yet.</p> : <div className="x-grid-2">{x.fields.map((f) => <div key={f.key}>{box(f.key, f.label, f.type === "long")}</div>)}</div>}
+              </Card>
+            ))}
+            {rest.length > 0 && <Card title="Other"><div className="x-grid-2">{rest.map((k) => <div key={k}>{box(k, label(k), false)}</div>)}</div></Card>}
+          </InlineForm>
+        </>
       );
     }
     else if (tab === "pricing") body = editor("pricing", "Pricing", priceFields, ["Service", "Price", "Comments"], (r) => [r.service, r.price === null ? "—" : `$${r.price}`, r.comments ?? "—"]);

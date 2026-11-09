@@ -71,7 +71,7 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
     loadSections(),
   ]);
   // Sections and their questions come from Stores → Sections; the built-in list is only a fallback.
-  const sectionList: [string, string[]][] = configured.length ? configured.map((c) => [c.title, c.fields.map((f) => f.key)]) : SECTIONS;
+  const allSections: [string, string[], string | null][] = configured.length ? configured.map((c) => [c.title, c.fields.map((f) => f.key), c.id]) : SECTIONS.map(([t, k]) => [t, k, null]);
   const fieldLabel = new Map(configured.flatMap((c) => c.fields.map((f) => [f.key, f.label] as const)));
   const serviceDept = (dept?.id as string | undefined) ?? null;
   const stores = all.filter((s: any) => s.active !== false && (scope === null || scope.includes(s.id))).map((s: any) => ({ id: s.id as string, name: s.name as string }));
@@ -87,7 +87,11 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
   const b = (row?.data ?? {}) as any;
   const g: Record<string, unknown> = b.generalInfo ?? {};
   const has = (k: string) => !SKIP.has(k) && g[k] !== null && g[k] !== undefined && g[k] !== "";
-  const placed = new Set(sectionList.flatMap(([, keys]) => keys));
+  // A store can hide standard sections and add sections only it has (Stores → the store → General info).
+  const hiddenSections = new Set<string>(b.hiddenSections ?? []);
+  const sectionList: [string, string[]][] = allSections.filter(([, , sid]) => !sid || !hiddenSections.has(sid)).map(([t, k]) => [t, k]);
+  const storeSections = ((b.storeSections ?? []) as { id: string; title: string; rows: { label: string; value: string }[] }[]).filter((x) => x.rows.some((r) => r.value));
+  const placed = new Set(allSections.flatMap(([, keys]) => keys));
   const other = Object.keys(g).filter((k) => has(k) && !placed.has(k));
   const groups: [string, string[]][] = [...sectionList.map(([t, keys]) => [t, keys.filter(has)] as [string, string[]]), ["Other", other]].filter(([, keys]) => keys.length) as [string, string[]][];
   const notes = [...new Map([...(b.announcements ?? []), ...(b.limitations ?? [])].filter((n: any) => n.active !== false).map((n: any) => [String(n.text).trim().toUpperCase(), n])).values()] as any[];
@@ -105,6 +109,7 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
     ...(logins.length ? [{ id: "logins", label: "Logins" }] : []),
     { id: "hours", label: "Hours" },
     ...groups.map(([t]) => ({ id: slug(t), label: t })),
+    ...storeSections.map((x) => ({ id: `own-${x.id}`, label: x.title })),
     { id: "pricing", label: "Pricing" },
     { id: "contacts", label: "Directory" },
   ];
@@ -167,6 +172,11 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
           {groups.map(([title, keys]) => (
             <Section key={title} id={slug(title)} title={title}>
               <Facts items={keys.map((k) => [fieldLabel.get(k) ?? label(k), <Answer key={k} k={k} value={g[k]} />])} />
+            </Section>
+          ))}
+          {storeSections.map((x) => (
+            <Section key={x.id} id={`own-${x.id}`} title={x.title}>
+              <Facts items={x.rows.filter((r) => r.value).map((r) => [r.label, <Answer key={r.label} k="text" value={r.value} />])} />
             </Section>
           ))}
           <Section id="pricing" title="Pricing">

@@ -83,3 +83,58 @@ export async function deleteItem(id: string, list: string, itemId: string) {
   if (!data) return;
   await store(user.email, id, { ...data, [list]: (data[list] ?? []).filter((r: any) => r.id !== itemId) }, `delete ${list}`);
 }
+
+// ---------- Per-store changes to the Service Data page ----------
+// hiddenSections: ids of standard sections this store doesn't show.
+// storeSections: sections only this store has, each a list of question / answer rows.
+const UUIDISH = /^[0-9a-z-]{8,40}$/i;
+
+export async function setSectionHidden(id: string, sectionId: string, hidden: boolean) {
+  const user = await requireUser("admin");
+  if (!UUIDISH.test(sectionId)) return;
+  const data = await load(id);
+  if (!data) return;
+  const set = new Set<string>(data.hiddenSections ?? []);
+  if (hidden) set.add(sectionId); else set.delete(sectionId);
+  await store(user.email, id, { ...data, hiddenSections: [...set] }, `${hidden ? "hide" : "show"} section`);
+}
+
+export async function saveStoreSection(id: string, sectionId: string | null, _: Result, f: FormData): Promise<Result> {
+  const user = await requireUser("admin");
+  const data = await load(id);
+  if (!data) return { error: "This dealership no longer exists." };
+  const title = String(f.get("title") ?? "").trim().slice(0, 120);
+  if (!title) return { error: "Give the section a name." };
+  const rows: { label: string; value: string }[] = [];
+  for (let i = 0; i < 60; i++) {
+    const label = String(f.get(`label_${i}`) ?? "").trim().slice(0, 200);
+    const value = String(f.get(`value_${i}`) ?? "").trim().slice(0, 4000);
+    if (label || value) rows.push({ label: label || "Note", value });
+  }
+  const list = [...(data.storeSections ?? [])] as any[];
+  if (sectionId) {
+    const i = list.findIndex((s) => s.id === sectionId);
+    if (i < 0) return { error: "This section no longer exists." };
+    list[i] = { ...list[i], title, rows };
+  } else list.push({ id: randomUUID(), title, rows });
+  return store(user.email, id, { ...data, storeSections: list }, sectionId ? "update store section" : "add store section");
+}
+
+export async function deleteStoreSection(id: string, sectionId: string) {
+  const user = await requireUser("admin");
+  const data = await load(id);
+  if (!data) return;
+  await store(user.email, id, { ...data, storeSections: (data.storeSections ?? []).filter((s: any) => s.id !== sectionId) }, "delete store section");
+}
+
+export async function moveStoreSection(id: string, sectionId: string, dir: -1 | 1) {
+  const user = await requireUser("admin");
+  const data = await load(id);
+  if (!data) return;
+  const list = [...(data.storeSections ?? [])];
+  const i = list.findIndex((s: any) => s.id === sectionId);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  await store(user.email, id, { ...data, storeSections: list }, "move store section");
+}

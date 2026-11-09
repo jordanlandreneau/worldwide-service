@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 type Store = { id: string; name: string };
 type Parsed = { name?: string; phone?: string; store?: Store; date?: string; time?: string; notes?: string };
@@ -119,8 +119,10 @@ const KEY = "appt_paste";
 // If the paste names a different store, the page switches to that store and fills the form there.
 export function PasteFill({ stores, currentStore, today }: { stores: Store[]; currentStore: string | null; today: string }) {
   const router = useRouter();
-  const box = useRef<HTMLTextAreaElement>(null);
-  const [msg, setMsg] = useState("");
+  const [text, setText] = useState("");
+  const [msg, setMsg] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
+  const found = text.trim() ? parseBooking(text, stores, today) : null;
+  const current = stores.find((s) => s.id === currentStore);
 
   const apply = (p: Parsed) => {
     const form = document.querySelector<HTMLFormElement>("#set form");
@@ -146,39 +148,66 @@ export function PasteFill({ stores, currentStore, today }: { stores: Store[]; cu
       const saved = JSON.parse(sessionStorage.getItem(KEY) ?? "null");
       if (saved && saved.store?.id === currentStore) {
         sessionStorage.removeItem(KEY);
-        const filled = apply(saved);
-        setMsg(`Switched to ${saved.store.name} and filled ${filled.join(", ")}. Check everything, then save.`);
+        apply(saved);
+        setMsg({ tone: "ok", text: `Switched to ${saved.store.name} and filled the form below. Check it, then save.` });
       }
     } catch { /* nothing saved */ }
   }, [currentStore]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fill = () => {
-    const text = box.current?.value ?? "";
-    if (!text.trim()) return setMsg("Paste the booking notes first.");
-    const p = parseBooking(text, stores, today);
-    if (p.store && p.store.id !== currentStore) {
-      try { sessionStorage.setItem(KEY, JSON.stringify(p)); } catch { /* storage off */ }
-      router.push(`/appointments?d=${p.store.id}#set`);
-      return setMsg(`Opening ${p.store.name}…`);
+    if (!found) return setMsg({ tone: "warn", text: "Paste the booking notes first." });
+    if (found.store && found.store.id !== currentStore) {
+      try { sessionStorage.setItem(KEY, JSON.stringify(found)); } catch { /* storage off */ }
+      setMsg({ tone: "ok", text: `Opening ${found.store.name}…` });
+      router.push(`/appointments?d=${found.store.id}#set`);
+      return;
     }
-    if (!currentStore) return setMsg("Couldn't tell which dealership this is. Pick the store at the top right, or add a line like “Dealership: Acura of Palm Beach”.");
-    const filled = apply(p);
-    const missing = ["name", "phone", "date", "time"].filter((k) => !filled.includes(k));
-    setMsg(filled.length ? `Filled ${filled.join(", ")}.${missing.length ? ` Couldn't find: ${missing.join(", ")}.` : ""} Check everything, then save.` : "Couldn't find anything to fill. Labeled lines work best (Name:, Phone:, Date:, Time:).");
+    if (!currentStore) return setMsg({ tone: "warn", text: "Pick the dealership at the top right, or add a line like “Dealership: Acura of Palm Beach”." });
+    const filled = apply(found);
+    setMsg(filled.length ? { tone: "ok", text: "Filled the form below. Check it, then save." } : { tone: "warn", text: "Nothing to fill. Try labeled lines like Name:, Phone:, Date:, Time:." });
   };
 
+  const show = (iso?: string) => iso ? new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : undefined;
+  const clock = (t?: string) => { if (!t) return undefined; const [h, m] = t.split(":").map(Number); return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`; };
+  const rows: [string, string | undefined, boolean][] = [
+    ["Name", found?.name, true],
+    ["Phone", found?.phone, true],
+    ["Dealership", found?.store?.name ?? (current ? `${current.name} (selected)` : undefined), true],
+    ["Date", show(found?.date), true],
+    ["Time", clock(found?.time), true],
+    ["Notes", found?.notes, false],
+  ];
+
   return (
-    <div className="paste-fill">
-      <p className="paste-fill-head"><strong>Paste to fill</strong> <span>Paste call notes or a booking blurb. Fields fill as best as possible for you to review.</span></p>
-      <label className="x-label" htmlFor="booking-notes">Booking notes</label>
-      <textarea id="booking-notes" ref={box} className="x-input" rows={5} style={{ height: "auto", padding: 10 }}
-        placeholder={"Name: Jane Doe\nPhone: (555) 123-4567\nDealership: Acura of Palm Beach\nDate: tomorrow\nTime: 3:00 PM\nNotes: oil change, 2021 MDX"} />
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-        <button type="button" className="x-btn" onClick={fill}>Fill form</button>
-        <button type="button" className="x-btn" onClick={() => { if (box.current) box.current.value = ""; setMsg(""); }}>Clear</button>
-        {msg && <span role="status" className="text-sm">{msg}</span>}
+    <section className="pf" aria-labelledby="pf-title">
+      <div className="pf-head">
+        <h3 id="pf-title">Paste to fill</h3>
+        <p>Paste call notes or a booking blurb. Check what was found, then fill the form.</p>
       </div>
-      <p className="text-sm text-ink-muted" style={{ marginTop: 6 }}>Labeled lines work best (Name, Phone, Dealership, Date, Time). The usual checks still run when you save.</p>
-    </div>
+      <div className="pf-body">
+        <div className="pf-paste">
+          <label htmlFor="booking-notes">Booking notes</label>
+          <textarea id="booking-notes" rows={7} value={text} onChange={(e) => { setText(e.target.value); setMsg(null); }}
+            placeholder={"Name: Jane Doe\nPhone: (555) 123-4567\nDealership: Acura of Palm Beach\nDate: tomorrow\nTime: 3:00 PM\nNotes: oil change, 2021 MDX"} />
+          <p className="pf-hint">Labeled lines work best, but a plain sentence works too.</p>
+        </div>
+        <div className="pf-found" aria-live="polite">
+          <span className="pf-label">What it found</span>
+          <dl>
+            {rows.map(([k, v, needed]) => (
+              <div key={k} className={v ? "ok" : needed ? "miss" : ""}>
+                <dt>{k}</dt>
+                <dd>{v ?? (needed ? (found ? "Not found" : "—") : "—")}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </div>
+      <div className="pf-foot">
+        <button type="button" className="x-btn x-btn-primary" onClick={fill} disabled={!text.trim()}>Fill form</button>
+        <button type="button" className="x-btn" onClick={() => { setText(""); setMsg(null); }} disabled={!text}>Clear</button>
+        {msg && <span role="status" className={`pf-msg ${msg.tone}`}>{msg.text}</span>}
+      </div>
+    </section>
   );
 }
