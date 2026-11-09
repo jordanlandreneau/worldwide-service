@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/access";
 import { db } from "@/lib/data";
 import type { Result } from "@/lib/manage";
+import { cleanSection } from "@/lib/blocks";
 
 const LISTS: Record<string, string[]> = {
   pricing: ["service", "price", "comments"],
@@ -86,7 +87,7 @@ export async function deleteItem(id: string, list: string, itemId: string) {
 
 // ---------- Per-store changes to the Service Data page ----------
 // hiddenSections: ids of standard sections this store doesn't show.
-// storeSections: sections only this store has, each a list of question / answer rows.
+// storeSections: sections only this store has, built from blocks (text, callouts, lists, tables, links).
 const UUIDISH = /^[0-9a-z-]{8,40}$/i;
 
 export async function setSectionHidden(id: string, sectionId: string, hidden: boolean) {
@@ -103,20 +104,16 @@ export async function saveStoreSection(id: string, sectionId: string | null, _: 
   const user = await requireUser("admin");
   const data = await load(id);
   if (!data) return { error: "This dealership no longer exists." };
-  const title = String(f.get("title") ?? "").trim().slice(0, 120);
-  if (!title) return { error: "Give the section a name." };
-  const rows: { label: string; value: string }[] = [];
-  for (let i = 0; i < 60; i++) {
-    const label = String(f.get(`label_${i}`) ?? "").trim().slice(0, 200);
-    const value = String(f.get(`value_${i}`) ?? "").trim().slice(0, 4000);
-    if (label || value) rows.push({ label: label || "Note", value });
-  }
+  let raw: any;
+  try { raw = JSON.parse(String(f.get("section") ?? "{}")); } catch { return { error: "Couldn't read this section. Try again." }; }
+  const section = cleanSection({ ...raw, id: sectionId ?? randomUUID() });
+  if (typeof section === "string") return { error: section };
   const list = [...(data.storeSections ?? [])] as any[];
   if (sectionId) {
     const i = list.findIndex((s) => s.id === sectionId);
     if (i < 0) return { error: "This section no longer exists." };
-    list[i] = { ...list[i], title, rows };
-  } else list.push({ id: randomUUID(), title, rows });
+    list[i] = section;
+  } else list.push(section);
   return store(user.email, id, { ...data, storeSections: list }, sectionId ? "update store section" : "add store section");
 }
 

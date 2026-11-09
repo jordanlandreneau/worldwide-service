@@ -5,6 +5,7 @@ import { db } from "@/lib/data";
 import Link from "next/link";
 import { deleteItem, deleteStoreSection, moveStoreSection, saveGeneral, saveItem, saveStoreSection, setSectionHidden } from "@/lib/service-admin";
 import { StoreSectionForm } from "@/components/store-section-form";
+import { normalizeSection, STYLES } from "@/lib/blocks";
 import { loadSections } from "@/lib/sections";
 
 export const DATA_TABS = [["general", "General info"], ["pricing", "Pricing"], ["contacts", "Contacts"], ["limitations", "Limitations"], ["announcements", "Announcements"]] as const;
@@ -44,7 +45,7 @@ export async function ServiceDataEditor({ id, tab }: { id: string; tab: string }
       // each store can hide any of them and add sections only it has.
       const sections = await loadSections();
       const hidden = new Set<string>(p.hiddenSections ?? []);
-      const own = (p.storeSections ?? []) as { id: string; title: string; rows: { label: string; value: string }[] }[];
+      const own = ((p.storeSections ?? []) as any[]).map(normalizeSection);
       const placed = new Set(sections.flatMap((x) => x.fields.map((f) => f.key)));
       const rest = [...new Set([...GENERAL, ...Object.keys(g)])].filter((k) => !SKIP.has(k) && !placed.has(k));
       const shown = sections.filter((x) => !hidden.has(x.id));
@@ -63,13 +64,13 @@ export async function ServiceDataEditor({ id, tab }: { id: string; tab: string }
               ))}
               {own.map((x, i) => (
                 <li key={x.id} className="own">
-                  <span className="ss-name"><strong>{x.title}</strong><small>Only this store · {x.rows.length} {x.rows.length === 1 ? "row" : "rows"}</small></span>
+                  <span className="ss-name"><strong>{x.title}</strong><small>Only this store · {STYLES.find((s) => s.value === x.style)?.label} · {x.blocks.length} {x.blocks.length === 1 ? "part" : "parts"}</small></span>
                   <span className="x-filters">
                     {i > 0 && <ActionButton label="↑" action={moveStoreSection.bind(null, id, x.id, -1)} />}
                     {i < own.length - 1 && <ActionButton label="↓" action={moveStoreSection.bind(null, id, x.id, 1)} />}
                     <ActionButton label="Delete" confirm={`Delete "${x.title}" from this store's page?`} action={deleteStoreSection.bind(null, id, x.id)} />
                   </span>
-                  <details className="ss-edit"><summary>Edit</summary><StoreSectionForm action={saveStoreSection.bind(null, id, x.id)} initial={{ title: x.title, rows: x.rows }} /></details>
+                  <details className="ss-edit"><summary>Edit</summary><StoreSectionForm action={saveStoreSection.bind(null, id, x.id)} initial={x} /></details>
                 </li>
               ))}
             </ul>

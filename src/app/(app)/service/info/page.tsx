@@ -9,6 +9,7 @@ import { External } from "@/components/ui";
 import { requireScoped } from "@/lib/scope";
 import { CREDENTIAL_COLUMNS, type Credential, db, fetchAll } from "@/lib/data";
 import { loadSections } from "@/lib/sections";
+import { type Block, normalizeSection } from "@/lib/blocks";
 
 export const metadata = { title: "Service Data · Worldwide Service" };
 
@@ -37,6 +38,17 @@ function Answer({ k, value }: { k: string; value: unknown }) {
 }
 const Facts = ({ items }: { items: [string, ReactNode][] }) => <dl className="svc-facts">{items.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>;
 const slug = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+// Store-only sections: blocks saved from the section editor. HTML was cleaned when it was saved.
+function Blocks({ blocks }: { blocks: Block[] }) {
+  return <>{blocks.map((b) => {
+    if (b.type === "text") return <div key={b.id} className="svc-rich" dangerouslySetInnerHTML={{ __html: b.html }} />;
+    if (b.type === "callout") return <div key={b.id} className={`svc-callout ${b.tone}`} dangerouslySetInnerHTML={{ __html: b.html }} />;
+    if (b.type === "facts") return <dl key={b.id} className="svc-facts">{b.rows.map((r, i) => <div key={i}><dt>{r.label}</dt><dd className="svc-rich" dangerouslySetInnerHTML={{ __html: r.value }} /></div>)}</dl>;
+    if (b.type === "table") return <Grid key={b.id} head={b.head} rows={b.rows} empty="" />;
+    return <div key={b.id} className="svc-linkrow">{b.items.map((l, i) => <a key={i} className="svc-linkbtn" href={l.url} target="_blank" rel="noopener noreferrer">{l.label || l.url}</a>)}</div>;
+  })}</>;
+}
 
 function Section({ id, title, alert, children }: { id: string; title: string; alert?: boolean; children: ReactNode }) {
   return (
@@ -90,7 +102,7 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
   // A store can hide standard sections and add sections only it has (Stores → the store → General info).
   const hiddenSections = new Set<string>(b.hiddenSections ?? []);
   const sectionList: [string, string[]][] = allSections.filter(([, , sid]) => !sid || !hiddenSections.has(sid)).map(([t, k]) => [t, k]);
-  const storeSections = ((b.storeSections ?? []) as { id: string; title: string; rows: { label: string; value: string }[] }[]).filter((x) => x.rows.some((r) => r.value));
+  const storeSections = ((b.storeSections ?? []) as any[]).map(normalizeSection).filter((x) => x.blocks.length);
   const placed = new Set(allSections.flatMap(([, keys]) => keys));
   const other = Object.keys(g).filter((k) => has(k) && !placed.has(k));
   const groups: [string, string[]][] = [...sectionList.map(([t, keys]) => [t, keys.filter(has)] as [string, string[]]), ["Other", other]].filter(([, keys]) => keys.length) as [string, string[]][];
@@ -109,7 +121,7 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
     ...(logins.length ? [{ id: "logins", label: "Logins" }] : []),
     { id: "hours", label: "Hours" },
     ...groups.map(([t]) => ({ id: slug(t), label: t })),
-    ...storeSections.map((x) => ({ id: `own-${x.id}`, label: x.title })),
+    ...storeSections.map((x) => ({ id: `own-${x.id}`, label: x.title, alert: x.style === "important" })),
     { id: "pricing", label: "Pricing" },
     { id: "contacts", label: "Directory" },
   ];
@@ -175,9 +187,10 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
             </Section>
           ))}
           {storeSections.map((x) => (
-            <Section key={x.id} id={`own-${x.id}`} title={x.title}>
-              <Facts items={x.rows.filter((r) => r.value).map((r) => [r.label, <Answer key={r.label} k="text" value={r.value} />])} />
-            </Section>
+            <section key={x.id} id={`own-${x.id}`} className={`svc-section own-${x.style}${x.style === "important" ? " alert" : ""}`}>
+              <div className="svc-section-head"><h2>{x.title}</h2></div>
+              <div className="svc-section-body"><Blocks blocks={x.blocks} /></div>
+            </section>
           ))}
           <Section id="pricing" title="Pricing">
             <Grid kind="pricing" head={["Service", "Price", "Comments"]} rows={(b.pricing ?? []).map((p: any) => [p.service, p.price === null || p.price === undefined ? "—" : `$${p.price}`, p.comments ?? "—"])} empty="No pricing yet." />
