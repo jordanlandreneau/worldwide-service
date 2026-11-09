@@ -23,8 +23,10 @@ export function dispatchText(f: Dispatch) {
 
 // The bottom of a chat: a plain message, or a customer dispatch in the BDC's usual layout.
 // Drafts are kept in this browser per chat until sent or cleared.
-export function Composer({ chatId, channel, recipients, advisors, initialText = "", sendMessage, sendDispatch }: {
-  chatId: string; channel: string; recipients: number; advisors: string[]; initialText?: string; sendMessage: Action; sendDispatch: Action;
+type ReplyTo = { id: string; who: string; text: string; cancelHref: string };
+
+export function Composer({ chatId, channel, recipients, advisors, initialText = "", replyTo, sendMessage, sendDispatch }: {
+  chatId: string; channel: string; recipients: number; advisors: string[]; initialText?: string; replyTo?: ReplyTo; sendMessage: Action; sendDispatch: Action;
 }) {
   const key = `fu_draft_${chatId}`;
   const [mode, setMode] = useState<"message" | "dispatch">("message");
@@ -49,7 +51,7 @@ export function Composer({ chatId, channel, recipients, advisors, initialText = 
         <button type="button" role="tab" aria-selected={mode === "dispatch"} onClick={() => setMode("dispatch")}>Customer dispatch</button>
       </div>
       {mode === "message"
-        ? <MessageForm channel={channel} body={body} setBody={setBody} action={sendMessage} onSent={() => { setBody(""); clearDraft(); }} onDraft={saveDraft} saved={saved} />
+        ? <MessageForm channel={channel} body={body} setBody={setBody} replyTo={replyTo} action={sendMessage} onSent={() => { setBody(""); clearDraft(); }} onDraft={saveDraft} saved={saved} />
         : <DispatchForm advisors={advisors} f={f} setF={setF} action={sendDispatch} onSent={() => { setF(EMPTY); clearDraft(); }} onDraft={saveDraft} saved={saved}
             onInsert={() => { setBody((b) => (b.trim() ? `${b.trim()}\n\n` : "") + dispatchText(f)); setMode("message"); }} />}
     </div>
@@ -70,11 +72,18 @@ function useSent(action: Action, onSent: () => void) {
   return [state, formAction, pending] as const;
 }
 
-function MessageForm({ channel, body, setBody, action, onSent, onDraft, saved }: { channel: string; body: string; setBody: (v: string) => void; action: Action; onSent: () => void; onDraft: () => void; saved: string }) {
+function MessageForm({ channel, body, setBody, replyTo, action, onSent, onDraft, saved }: { channel: string; body: string; setBody: (v: string) => void; replyTo?: ReplyTo; action: Action; onSent: () => void; onDraft: () => void; saved: string }) {
   const [state, formAction, pending] = useSent(action, onSent);
   const form = useRef<HTMLFormElement>(null);
   return (
     <form ref={form} action={formAction}>
+      {replyTo && (
+        <div className="fu-replying">
+          <input type="hidden" name="reply_to" value={replyTo.id} />
+          <span><strong>Replying to {replyTo.who}</strong><em>{replyTo.text}</em></span>
+          <a href={replyTo.cancelHref} aria-label="Cancel reply">✕</a>
+        </div>
+      )}
       <textarea className="fu-input" name="body" rows={3} maxLength={4096} placeholder={`Message via ${channel}…`} value={body} onChange={(e) => setBody(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) form.current?.requestSubmit(); }} />
       <Status state={state} saved={saved} />

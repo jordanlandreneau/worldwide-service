@@ -65,8 +65,35 @@ export async function sendReply(chatId: string, _: Result, f: FormData): Promise
   const by = await sender();
   const body = text(f, "body", 4000);
   if (!body) return { error: "Type a message." };
-  const { data: chat } = await db().from("follow_chats").select("name").eq("id", chatId).maybeSingle();
-  return send(chatId, body, `Re: ${chat?.name ?? "Follow up"}`, {}, by);
+  const client = db();
+  const { data: chat } = await client.from("follow_chats").select("name").eq("id", chatId).maybeSingle();
+  // A reply is linked to the store message it answers, and that message is marked answered once it sends.
+  const replyTo = text(f, "reply_to", 64);
+  const { data: original } = replyTo && UUID.test(replyTo)
+    ? await client.from("follow_messages").select("id").eq("id", replyTo).eq("chat_id", chatId).eq("direction", "inbound").maybeSingle()
+    : { data: null };
+  const result = await send(chatId, body, `Re: ${chat?.name ?? "Follow up"}`, original ? { reply_to: original.id } : {}, by);
+  if (result.ok && original) {
+    await client.from("follow_messages").update({ handled_kind: "answered", handled_by: by.email, handled_name: by.name, handled_at: new Date().toISOString(), read: true }).eq("id", original.id);
+    refresh(chatId);
+  }
+  return result;
+}
+
+// "Got it" without replying in the chat: the message counts as handled and shows who acknowledged it.
+export async function acknowledge(chatId: string, id: string) {
+  const by = await sender();
+  if (!UUID.test(chatId) || !UUID.test(id)) return;
+  await db().from("follow_messages").update({ handled_kind: "acknowledged", handled_by: by.email, handled_name: by.name, handled_at: new Date().toISOString(), read: true })
+    .eq("id", id).eq("chat_id", chatId).eq("direction", "inbound").is("handled_kind", null);
+  refresh(chatId);
+}
+
+export async function reopen(chatId: string, id: string) {
+  await sender();
+  if (!UUID.test(chatId) || !UUID.test(id)) return;
+  await db().from("follow_messages").update({ handled_kind: null, handled_by: null, handled_name: null, handled_at: null }).eq("id", id).eq("chat_id", chatId);
+  refresh(chatId);
 }
 
 export async function markRead(chatId: string) {

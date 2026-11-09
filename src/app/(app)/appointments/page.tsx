@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ActionButton, Field, InlineForm } from "@/components/action-form";
+import { PasteFill } from "@/components/paste-fill";
 import { StorePicker } from "@/components/store-picker";
 import { Card, Page, Table } from "@/components/ui";
 import { atLeast } from "@/lib/access";
@@ -40,7 +41,8 @@ export default async function Appointments({ searchParams }: { searchParams: Pro
     <Page title="Appointments" subtitle={store ? `${store.name}` : staff ? "Every Service store" : "Your stores"} actions={stores.length > 1 ? <StorePicker base="/appointments" stores={stores} selected={store?.name} /> : undefined}>
       {added && <Card><p role="status" className="text-sm">Appointment saved. No text is sent; the store&apos;s CRM confirms it with the customer.</p></Card>}
       {staff && (
-        <div id="set"><Card title="Set an appointment" note={store ? `Times are ${store.name}'s local time.` : "Choose the store first (top right)."}>
+        <div id="set"><Card title="Set an appointment" note={store ? `Times are ${store.name}'s local time.` : "Choose the store at the top right, or paste booking notes that name the dealership."}>
+          <PasteFill stores={stores.map((s) => ({ id: s.id as string, name: s.name as string }))} currentStore={store?.id ?? null} today={today} />
           {store ? (
             <InlineForm action={saveAppointment.bind(null, store.id)} submit="Save appointment">
               <div className="cc-form-grid">

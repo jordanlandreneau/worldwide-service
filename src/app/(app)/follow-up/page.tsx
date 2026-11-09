@@ -7,15 +7,15 @@ import { Composer } from "@/components/follow-composer";
 import { ChatFields } from "@/components/follow-chat-fields";
 import { atLeast, requireUser } from "@/lib/access";
 import { db, fetchAll } from "@/lib/data";
-import { addMember, bulkAddMembers, deleteChat, markRead, removeMember, saveChat, sendFollowUp, sendReply, setMemberEmail, syncWhatsAppNames } from "@/lib/follow";
+import { acknowledge, addMember, bulkAddMembers, deleteChat, markRead, removeMember, reopen, saveChat, sendFollowUp, sendReply, setMemberEmail, syncWhatsAppNames } from "@/lib/follow";
 import { CHANNELS, channelReady } from "@/lib/follow-send";
 import { teamsAccount, teamsConfigured } from "@/lib/follow-providers";
-import { LiveSync } from "@/components/follow-live";
+import { DesktopAlerts } from "@/components/follow-live";
 
 export const metadata = { title: "Follow-ups · Worldwide Service" };
 
 type Channel = keyof typeof CHANNELS;
-type Params = { teams?: string; view?: string; channel?: string; chat?: string; tab?: string; q?: string; msg?: string; reply?: string; mention?: string };
+type Params = { show?: string; teams?: string; view?: string; channel?: string; chat?: string; tab?: string; q?: string; msg?: string; reply?: string; mention?: string };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ICON: Record<Channel, string> = { whatsapp: "💬", sms: "📱", slack: "🔔", email: "✉️", teams: "🟣", google_chat: "🗨️" };
 const DAY = 24 * 3600 * 1000;
@@ -45,7 +45,8 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
     teamsConfigured() ? teamsAccount().catch(() => null) : Promise.resolve(null),
     fetchAll<any>("follow_chats", "id,name,channel,dealership_id,active,last_activity,whatsapp_group_id,teams_chat_id,google_chat_space,linq_group_id,slack_channel_id", "name"),
     fetchAll<any>("dealerships", "id,name,active", "name"),
-    client.from("follow_messages").select("chat_id").eq("direction", "inbound").eq("read", false).limit(5000),
+    // "Pending" means store messages nobody has answered or acknowledged yet.
+    client.from("follow_messages").select("chat_id").eq("direction", "inbound").is("handled_kind", null).limit(5000),
     client.from("follow_members").select("id,chat_id,name,phone,email,role").order("name").limit(10000),
   ]);
   const unread = new Map<string, number>();
@@ -65,7 +66,6 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
 
   return (
     <div className="fu-app" data-theme={theme}>
-      <LiveSync />
       <aside className="fu-side">
         <div className="fu-side-head">
           <span className="fu-logo"><MessagesSquare size={18} /></span>
@@ -103,6 +103,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
             <a className="fu-conn-btn" href="/api/public/microsoft-auth-start">Connect Teams</a>
           </div>
         )}
+        <DesktopAlerts />
         {manager && <Link className="fu-check" href="/follow-up/check">Check connections</Link>}
         <div className="fu-user">
           <span className="fu-avatar">{initials}</span>
@@ -231,42 +232,82 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   }
 
   async function Thread({ chat, people }: { chat: any; people: any[] }) {
-    const { data } = await client.from("follow_messages").select("id,direction,body,sender_name,sender,status,error,read,created_at").eq("chat_id", chat.id).order("created_at", { ascending: false }).limit(200);
-    const thread = ((data ?? []) as any[]).reverse();
-    const pending = thread.filter((m) => m.direction === "inbound" && !m.read).length;
+    const { data } = await client.from("follow_messages").select("id,direction,body,sender_name,sender,kind,status,error,read,created_at,reply_to,handled_kind,handled_name,handled_at").eq("chat_id", chat.id).order("created_at", { ascending: false }).limit(200);
+    const all = ((data ?? []) as any[]).reverse();
+    const byId = new Map(all.map((m) => [m.id, m]));
+    // Our replies sit under the store message they answer, not in the main stream.
+    const answers = new Map<string, any[]>();
+    for (const m of all) if (m.direction === "outbound" && m.reply_to && byId.has(m.reply_to)) answers.set(m.reply_to, [...(answers.get(m.reply_to) ?? []), m]);
+    const open = all.filter((m) => m.direction === "inbound" && !m.handled_kind);
+    const onlyOpen = sp.show === "open";
+    const stream = onlyOpen ? open : all.filter((m) => !(m.direction === "outbound" && m.reply_to && byId.has(m.reply_to)));
+    const pending = all.filter((m) => m.direction === "inbound" && !m.read).length;
     const advisors = people.filter((p) => !/wwbdc|worldwide|service bdc|management/i.test(`${p.name} ${p.email ?? ""}`)).map((p) => p.name as string);
     const recipients = chat.channel === "email" ? people.filter((p) => p.email).length : people.length;
+    const quoted = sp.reply ? byId.get(sp.reply) : undefined;
+    const who = (m: any) => (m.direction === "outbound" ? "WWBDC" : m.sender_name || m.sender || "Store");
+    const here = { chat: chat.id, q: sp.q, show: sp.show };
     let lastDay = "";
-    const quoted = sp.reply ? thread.find((m) => m.id === sp.reply) : undefined;
-    const initial = quoted
-      ? `Replying to ${quoted.direction === "outbound" ? "WWBDC" : quoted.sender_name || "Store"}: "${quoted.body.replace(/\s+/g, " ").slice(0, 90)}${quoted.body.length > 90 ? "…" : ""}"\n`
-      : sp.mention ? `@${sp.mention.slice(0, 80)} ` : "";
     return (
       <>
+        <div className="fu-thread-tools">
+          <Link href={link({ ...here, show: undefined })} className={!onlyOpen ? "active" : ""}>All messages</Link>
+          <Link href={link({ ...here, show: "open" })} className={onlyOpen ? "active" : ""}>Needs reply{open.length ? <b>{open.length}</b> : null}</Link>
+          <span className="fu-legend"><i className="in" /> Store <i className="reply" /> Our reply <i className="out" /> Our message <i className="dispatch" /> Dispatch</span>
+          {pending > 0 && <form action={markRead.bind(null, chat.id)} className="fu-markread"><button>Mark {pending} as read</button></form>}
+        </div>
         <div className="fu-thread-wrap"><div>
-          {pending > 0 && <form action={markRead.bind(null, chat.id)} className="fu-markread"><button>Mark {pending} {pending === 1 ? "reply" : "replies"} as read</button></form>}
-          {thread.length === 0 && <p className="fu-muted fu-pad">No messages yet. Sent follow-ups and the store&apos;s replies show here.</p>}
+          {stream.length === 0 && <p className="fu-muted fu-pad">{onlyOpen ? "Nothing waiting. Every store message has been answered or acknowledged." : "No messages yet. Sent follow-ups and the store's replies show here."}</p>}
           <ol className="fu-thread">
-            {thread.map((m) => {
+            {stream.map((m) => {
               const d = day(m.created_at);
-              const sep = d !== lastDay ? (lastDay = d) : null;
+              const sep = !onlyOpen && d !== lastDay ? (lastDay = d) : null;
+              const kind = m.direction === "inbound" ? "inbound" : m.kind === "follow_up" ? "outbound dispatch" : m.reply_to ? "outbound reply" : "outbound";
+              const label = m.direction === "inbound" ? who(m) : m.kind === "follow_up" ? "Follow-up dispatch" : m.reply_to ? "Our reply" : "Our message";
+              const replies = answers.get(m.id) ?? [];
               return (
                 <li key={m.id} className="fu-row">
                   {sep && <div className="fu-day">{sep}</div>}
-                  <div className={`fu-bubble ${m.direction}${m.direction === "inbound" && !m.read ? " unread" : ""}${m.status === "failed" ? " failed" : ""}`}>
-                    <span className="fu-who">{m.direction === "outbound" ? "WWBDC" : m.sender_name || "Store"}</span>
-                    {m.direction === "inbound" && m.sender && <span className="fu-mono fu-from">{m.sender}</span>}
+                  {onlyOpen && <div className="fu-day">{day(m.created_at)}</div>}
+                  <div className={`fu-bubble ${kind}${m.direction === "inbound" && !m.handled_kind ? " open" : ""}${m.direction === "inbound" && !m.read ? " unread" : ""}${m.status === "failed" ? " failed" : ""}`}>
+                    <span className="fu-who">{label}</span>
+                    {m.direction === "inbound" && m.sender && m.sender_name && <span className="fu-mono fu-from">{m.sender}</span>}
+                    {m.direction === "outbound" && m.reply_to && byId.get(m.reply_to) && <span className="fu-quote">↪ {who(byId.get(m.reply_to))}: {byId.get(m.reply_to).body.slice(0, 80)}</span>}
                     <p>{m.body}</p>
                     <span className="fu-time">{time(m.created_at)}{m.direction === "outbound" && m.sender_name ? ` · ${m.sender_name}` : ""}</span>
                     {m.status === "failed" && <span className="fu-notsent">Not sent{m.error ? `: ${m.error}` : ""}</span>}
                   </div>
-                  <Link className={`fu-reply ${m.direction}`} href={link({ chat: chat.id, q: sp.q, reply: m.id })}><Reply size={11} /> Reply</Link>
+                  {m.direction === "inbound" && (
+                    <div className="fu-handled">
+                      {m.handled_kind ? (
+                        <span className={`fu-state ${m.handled_kind}`}>{m.handled_kind === "answered" ? "✓ Answered" : "👍 Acknowledged"} by {m.handled_name ?? "BDC"} · {time(m.handled_at)}</span>
+                      ) : <span className="fu-state open">Needs reply</span>}
+                      <Link href={link({ ...here, reply: m.id })}><Reply size={12} /> Reply</Link>
+                      {!m.handled_kind && <form action={acknowledge.bind(null, chat.id, m.id)}><button>👍 Acknowledge</button></form>}
+                      {m.handled_kind && <form action={reopen.bind(null, chat.id, m.id)}><button>Reopen</button></form>}
+                    </div>
+                  )}
+                  {replies.length > 0 && (
+                    <ul className="fu-answers">
+                      {replies.map((r) => (
+                        <li key={r.id} className={`fu-bubble outbound reply${r.status === "failed" ? " failed" : ""}`}>
+                          <span className="fu-who">Our reply</span>
+                          <p>{r.body}</p>
+                          <span className="fu-time">{time(r.created_at)}{r.sender_name ? ` · ${r.sender_name}` : ""}</span>
+                          {r.status === "failed" && <span className="fu-notsent">Not sent{r.error ? `: ${r.error}` : ""}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </li>
               );
             })}
           </ol>
         </div></div>
-        <Composer key={`${chat.id}-${sp.reply ?? ""}-${sp.mention ?? ""}`} chatId={chat.id} initialText={initial} channel={CHANNELS[chat.channel as Channel]} recipients={recipients} advisors={advisors} sendMessage={sendReply.bind(null, chat.id)} sendDispatch={sendFollowUp.bind(null, chat.id)} />
+        <Composer key={`${chat.id}-${sp.reply ?? ""}-${sp.mention ?? ""}`} chatId={chat.id}
+          initialText={sp.mention ? `@${sp.mention.slice(0, 80)} ` : ""}
+          replyTo={quoted && quoted.direction === "inbound" ? { id: quoted.id, who: who(quoted), text: quoted.body.replace(/\s+/g, " ").slice(0, 120), cancelHref: link(here) } : undefined}
+          channel={CHANNELS[chat.channel as Channel]} recipients={recipients} advisors={advisors} sendMessage={sendReply.bind(null, chat.id)} sendDispatch={sendFollowUp.bind(null, chat.id)} />
       </>
     );
   }
