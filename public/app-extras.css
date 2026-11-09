@@ -1125,3 +1125,7 @@ span.cc-wave { cursor: default; }
 .wl-buttons { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 5px; }
 .wl-out { font-size: 11.5px; letter-spacing: .01em; text-align: left; line-height: 1.25; padding: 6px 8px; }
 .wl-out[data-tone="slate"] { color: #344054; }
+/* Login rows: label | value | buttons on one line; the value wraps instead of pushing buttons down. */
+.svc-login li { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 10px; align-items: center; flex-wrap: nowrap; }
+.svc-login li .svc-secret { min-width: 0; overflow-wrap: anywhere; }
+.svc-login .svc-actions { display: inline-flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }

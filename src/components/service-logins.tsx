@@ -67,18 +67,18 @@ export function ServiceLogins({ credentials }: { credentials: Credential[] }) {
               <li>
                 <strong>User</strong>
                 <span className="svc-secret">{c.username ?? "—"}</span>
-                {c.username && <CopyButton label="username" get={async () => c.username} />}
+                <span className="svc-actions">{c.username && <CopyButton label="username" get={async () => c.username} />}</span>
               </li>
               <li>
                 <strong>Pass</strong>
                 <span className="svc-secret">{!c.has_password ? "—" : shown[c.id] ?? "••••••••"}</span>
                 {c.has_password && (
-                  <>
+                  <span className="svc-actions">
                     <button type="button" className="svc-icon-btn" onClick={() => toggle(c.id)} aria-label={shown[c.id] !== undefined ? "Hide password" : "Show password"} title={shown[c.id] !== undefined ? "Hide password" : "Show password"}>
                       {shown[c.id] !== undefined ? <EyeOff size={14} aria-hidden /> : <Eye size={14} aria-hidden />}
                     </button>
                     <CopyButton label="password" get={() => fetchPassword(c.id)} />
-                  </>
+                  </span>
                 )}
               </li>
             </ul>
