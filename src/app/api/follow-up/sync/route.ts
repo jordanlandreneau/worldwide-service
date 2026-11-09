@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { atLeast, getUser } from "@/lib/access";
 import { db } from "@/lib/data";
 import { pullAll } from "@/lib/follow-sync";
+import { storesForUser } from "@/lib/assignments";
 
 // Called in the background on every page for agents and up: pulls new replies, then returns
 // the store messages that reached the site since the browser last asked (for popups).
@@ -20,8 +21,20 @@ export async function POST(request: NextRequest) {
   const ids = [...new Set(rows.map((r) => r.chat_id))];
   const { data: chats } = ids.length ? await client.from("follow_chats").select("id,name,channel").in("id", ids) : { data: [] };
   const chat = new Map(((chats ?? []) as any[]).map((c) => [c.id, c]));
+  const until = rows.length === 10 ? rows.at(-1)!.received_at : now;
+  // Site events (a store uploaded a calling sheet, work assigned to you) in the same window.
+  const { data: ev } = await client.from("site_events").select("id,kind,dealership_id,user_id,title,body,link,created_by,created_at")
+    .gt("created_at", since).lte("created_at", until).order("created_at").limit(20);
+  let events = ((ev ?? []) as any[]).filter((e) => (e.user_id ? e.user_id === user.id : true) && String(e.created_by ?? "").toLowerCase() !== user.email.toLowerCase());
+  if (!atLeast(user.role, "manager") && events.some((e) => !e.user_id)) {
+    const mine = user.id ? await storesForUser(user.id) : new Set<string>();
+    events = events.filter((e) => e.user_id || (e.dealership_id && mine.has(e.dealership_id)));
+  }
   return NextResponse.json({
-    added: added || rows.length, now: rows.at(-1)?.received_at ?? now,
-    messages: rows.map((r) => ({ id: r.id, chatId: r.chat_id, chat: chat.get(r.chat_id)?.name ?? "Chat", channel: chat.get(r.chat_id)?.channel ?? "", from: r.sender_name || r.sender || "Store", body: String(r.body).slice(0, 300) })),
+    added: added || rows.length, now: until,
+    messages: [
+      ...rows.map((r) => ({ id: r.id, chatId: r.chat_id, chat: chat.get(r.chat_id)?.name ?? "Chat", channel: chat.get(r.chat_id)?.channel ?? "", from: r.sender_name || r.sender || "Store", body: String(r.body).slice(0, 300) })),
+      ...events.map((e) => ({ id: e.id, chatId: "", chat: e.title, channel: "event", from: e.kind === "assigned" ? "Assigned to you" : "Calling sheet", body: String(e.body ?? "").slice(0, 300), href: e.link || "/command" })),
+    ],
   });
 }

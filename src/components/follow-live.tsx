@@ -2,8 +2,9 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-type Msg = { id: string; chatId: string; chat: string; channel: string; from: string; body: string };
-const NAMES: Record<string, string> = { whatsapp: "WhatsApp", teams: "Teams", email: "Email", google_chat: "Google Chat", sms: "Text", slack: "Slack" };
+type Msg = { id: string; chatId: string; chat: string; channel: string; from: string; body: string; href?: string };
+const link = (m: Msg) => m.href ?? `/follow-up?channel=${m.channel}&chat=${m.chatId}`;
+const NAMES: Record<string, string> = { event: "Command Center", whatsapp: "WhatsApp", teams: "Teams", email: "Email", google_chat: "Google Chat", sms: "Text", slack: "Slack" };
 
 // Runs on every page for agents and up. Every 15 seconds while the tab is open it pulls new store replies,
 // pops up each new message (and a desktop alert when the tab is in the background, if allowed),
@@ -28,11 +29,11 @@ export function LiveSync() {
         const fresh = out.messages ?? [];
         if (fresh.length) {
           setToasts((t) => [...t, ...fresh].slice(-4));
-          for (const m of fresh) setTimeout(() => setToasts((t) => t.filter((x) => x.id !== m.id)), 15000);
+          for (const m of fresh) setTimeout(() => setToasts((t) => t.filter((x) => x.id !== m.id)), m.channel === "event" ? 60000 : 15000);
           if (document.visibilityState !== "visible" && "Notification" in window && Notification.permission === "granted") {
             for (const m of fresh.slice(-3)) {
               const n = new Notification(`${m.chat} · ${m.from}`, { body: m.body, tag: m.id });
-              n.onclick = () => { window.focus(); router.push(`/follow-up?channel=${m.channel}&chat=${m.chatId}`); n.close(); };
+              n.onclick = () => { window.focus(); router.push(link(m)); n.close(); };
             }
           }
         }
@@ -48,8 +49,8 @@ export function LiveSync() {
   return (
     <div className="fu-toasts" role="status" aria-live="polite">
       {toasts.map((m) => (
-        <a key={m.id} className="fu-toast" data-ch={m.channel} href={`/follow-up?channel=${m.channel}&chat=${m.chatId}`}
-          onClick={(e) => { e.preventDefault(); setToasts((t) => t.filter((x) => x.id !== m.id)); router.push(`/follow-up?channel=${m.channel}&chat=${m.chatId}`); }}>
+        <a key={m.id} className="fu-toast" data-ch={m.channel} href={link(m)}
+          onClick={(e) => { e.preventDefault(); setToasts((t) => t.filter((x) => x.id !== m.id)); router.push(link(m)); }}>
           <span className="fu-toast-top"><strong>{m.chat}</strong>{NAMES[m.channel] ?? ""}
             <button type="button" aria-label="Dismiss" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setToasts((t) => t.filter((x) => x.id !== m.id)); }}>✕</button></span>
           <p>{m.body}</p>

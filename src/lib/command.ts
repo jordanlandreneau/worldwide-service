@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/data";
 import type { Result } from "@/lib/manage";
 import { atLeast } from "@/lib/access";
-import { requireScoped } from "@/lib/scope";
+import { localToUtc, requireScoped, showLocal } from "@/lib/scope";
+import { notifyAssigned, notifyListUpload } from "@/lib/assignments";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -15,6 +16,25 @@ const text = (f: FormData, k: string, max = 4000) => {
   return v === "" ? null : v;
 };
 const refresh = () => revalidatePath("/command");
+const TIME = /^\d{2}:\d{2}$/;
+
+async function storeInfo(id: string) {
+  const { data } = await db().from("dealerships").select("name,timezone").eq("id", id).maybeSingle();
+  return { name: (data as any)?.name ?? "A store", tz: (data as any)?.timezone || "America/New_York" };
+}
+// "Due by" date and time, in the store's time zone. No date means no deadline.
+function readDue(f: FormData, tz: string, prefix = "due"): { at: string | null; text: string | null } | string {
+  const date = text(f, `${prefix}_date`, 10);
+  if (!date) return { at: null, text: null };
+  if (!DATE.test(date)) return "Enter the due date as a date.";
+  const time = text(f, `${prefix}_time`, 5) ?? "17:00";
+  if (!TIME.test(time)) return "Enter the due time as a time.";
+  const at = localToUtc(date, time, tz);
+  if (Number.isNaN(at.getTime())) return "That due date isn't valid.";
+  return { at: at.toISOString(), text: showLocal(at.toISOString(), tz) };
+}
+const sameTime = (a: string | null | undefined, b: string | null | undefined) => (a ? new Date(a).getTime() : 0) === (b ? new Date(b).getTime() : 0);
+const readAgent = (f: FormData, key = "assigned_to") => { const v = text(f, key, 64); return v && UUID.test(v) ? v : null; };
 
 // Managers and admins edit the board and mark completion. Agents only view.
 // Store logins see their own stores and upload lists; they can't mark completion.
@@ -43,8 +63,12 @@ export async function saveCampaign(storeId: string, id: string | null, _: Result
   const name = text(f, "name", 200);
   if (!category) return { error: "Enter a category." };
   if (!name) return { error: "Enter a campaign name." };
+  const store = await storeInfo(storeId);
+  const due = readDue(f, store.tz);
+  if (typeof due === "string") return { error: due };
+  const assignedTo = readAgent(f);
   const fields = {
-    category, name,
+    category, name, due_at: due.at, assigned_to: assignedTo,
     description: text(f, "description"), cadence: text(f, "cadence", 120), list_ref: text(f, "list_ref"),
     launch_date: text(f, "launch_date", 120), script: text(f, "script", 20000), info: text(f, "info", 20000),
     updated_at: new Date().toISOString(),
@@ -60,8 +84,10 @@ export async function saveCampaign(storeId: string, id: string | null, _: Result
   }
   const client = db();
   const rowId = id ?? randomUUID();
+  let before: { assigned_to: string | null; due_at: string | null } | null = null;
   if (id) {
     if (!(await campaignInStore(storeId, id))) return { error: "This campaign no longer exists." };
+    before = (await client.from("campaigns").select("assigned_to,due_at").eq("id", id).maybeSingle()).data as any;
     const { error } = await client.from("campaigns").update(fields).eq("id", id).eq("dealership_id", storeId);
     if (error) return { error: "Couldn't save this campaign." };
   } else {
@@ -70,9 +96,13 @@ export async function saveCampaign(storeId: string, id: string | null, _: Result
     if (error) return { error: "Couldn't add this campaign." };
   }
   await client.from("edit_log").insert({ user_email: user.email, table_name: "campaigns", row_id: rowId, action: id ? "update campaign" : "add campaign" });
+  if (assignedTo && (assignedTo !== before?.assigned_to || !sameTime(due.at, before?.due_at))) {
+    await notifyAssigned({ userId: assignedTo, storeId, storeName: store.name, what: `Campaign: ${category} · ${name}`, dueText: due.text, link: `/command?d=${storeId}`, by: user }).catch(() => undefined);
+  }
   if (parsed && hasFile) {
-    const saved = await saveList(storeId, rowId, file.name, parsed, text(f, "list_note", 1000), user.email);
-    if (!saved) { refresh(); return { error: "The campaign was saved, but its list wasn't. Upload it again from the campaign." }; }
+    const listId = await saveList(storeId, rowId, file.name, parsed, text(f, "list_note", 1000), user.email, due.at, assignedTo);
+    if (!listId) { refresh(); return { error: "The campaign was saved, but its list wasn't. Upload it again from the campaign." }; }
+    await notifyListUpload({ storeId, storeName: store.name, listId, fileName: file.name, rows: parsed.rows.length, campaign: name, dueText: due.text, by: { email: user.email, name: user.name, dealership: false } }).catch(() => undefined);
   }
   refresh();
   return { ok: true };
@@ -161,12 +191,12 @@ async function readCsv(file: File): Promise<Parsed | string> {
   if (rows.length > MAX_ROWS) return `The file has ${rows.length.toLocaleString()} rows. The limit is ${MAX_ROWS.toLocaleString()} per file.`;
   return { columns: all[0].map((h, i) => h.trim() || `Column ${i + 1}`), rows };
 }
-async function saveList(storeId: string, campaignId: string | null, name: string, p: Parsed, note: string | null, email: string) {
-  const { error } = await db().from("outbound_lists").insert({
+async function saveList(storeId: string, campaignId: string | null, name: string, p: Parsed, note: string | null, email: string, dueAt: string | null, assignedTo: string | null) {
+  const { data, error } = await db().from("outbound_lists").insert({
     dealership_id: storeId, campaign_id: campaignId, file_name: name.slice(0, 200), columns: p.columns, rows: p.rows,
-    row_count: p.rows.length, note, uploaded_by: email,
-  });
-  return !error;
+    row_count: p.rows.length, note, uploaded_by: email, due_at: dueAt, assigned_to: assignedTo,
+  }).select("id").single();
+  return error ? null : (data as any).id as string;
 }
 
 export async function uploadList(storeId: string, _: Result, f: FormData): Promise<Result> {
@@ -178,7 +208,38 @@ export async function uploadList(storeId: string, _: Result, f: FormData): Promi
   if (campaignId && !(await campaignInStore(storeId, campaignId))) return { error: "Choose a campaign from this store." };
   const p = await readCsv(file);
   if (typeof p === "string") return { error: p };
-  if (!(await saveList(storeId, campaignId, file.name, p, text(f, "note", 1000), user.email))) return { error: "Couldn't save this list." };
+  const store = await storeInfo(storeId);
+  const due = readDue(f, store.tz);
+  if (typeof due === "string") return { error: due };
+  // Store logins set a deadline; only managers and admins hand the sheet to an agent.
+  const assignedTo = atLeast(user.role, "manager") ? readAgent(f) : null;
+  const listId = await saveList(storeId, campaignId, file.name, p, text(f, "note", 1000), user.email, due.at, assignedTo);
+  if (!listId) return { error: "Couldn't save this list." };
+  let campaign: string | null = null;
+  if (campaignId) campaign = ((await db().from("campaigns").select("name").eq("id", campaignId).maybeSingle()).data as any)?.name ?? null;
+  const by = { email: user.email, name: user.name, dealership: user.role === "dealership" };
+  await notifyListUpload({ storeId, storeName: store.name, listId, fileName: file.name, rows: p.rows.length, campaign, dueText: due.text, by }).catch(() => undefined);
+  if (assignedTo) await notifyAssigned({ userId: assignedTo, storeId, storeName: store.name, what: `Calling sheet: ${file.name} (${p.rows.length.toLocaleString()} customers)`, dueText: due.text, link: `/command?d=${storeId}&tab=lists`, by }).catch(() => undefined);
+  refresh();
+  return { ok: true };
+}
+
+// Change who works a calling sheet and when it's due.
+export async function setListTask(storeId: string, listId: string, _: Result, f: FormData): Promise<Result> {
+  const user = await staff(storeId);
+  if (!user || !UUID.test(listId)) return { error: "You don't have access to this." };
+  const client = db();
+  const before = (await client.from("outbound_lists").select("file_name,row_count,assigned_to,due_at").eq("id", listId).eq("dealership_id", storeId).maybeSingle()).data as any;
+  if (!before) return { error: "This list no longer exists." };
+  const store = await storeInfo(storeId);
+  const due = readDue(f, store.tz);
+  if (typeof due === "string") return { error: due };
+  const assignedTo = readAgent(f);
+  const { error } = await client.from("outbound_lists").update({ due_at: due.at, assigned_to: assignedTo }).eq("id", listId);
+  if (error) return { error: "Couldn't save." };
+  if (assignedTo && (assignedTo !== before.assigned_to || !sameTime(due.at, before.due_at))) {
+    await notifyAssigned({ userId: assignedTo, storeId, storeName: store.name, what: `Calling sheet: ${before.file_name} (${Number(before.row_count).toLocaleString()} customers)`, dueText: due.text, link: `/command?d=${storeId}&tab=lists`, by: user }).catch(() => undefined);
+  }
   refresh();
   return { ok: true };
 }
