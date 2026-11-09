@@ -44,10 +44,12 @@ export async function saveStore(id: string | null, _: Result, f: FormData): Prom
   const website = text(f, "website");
   const storeLine = text(f, "just_call_number", 40);
   const serviceLine = text(f, "service_just_call_number", 40);
+  const codeSender = text(f, "code_sender_number", 40);
+  if (codeSender && digits(codeSender).length < 5) return { error: "Enter the full number codes are routed from." };
   for (const n of [storeLine, serviceLine]) if (n && digits(n).length < 10) return { error: "JustCall numbers need all 10 digits." };
   const fields = {
     name, address: text(f, "address", 300), phone: text(f, "phone", 40), website, logo_url: logo, timezone,
-    just_call_number: storeLine, agent_code_number: text(f, "agent_code_number", 40), special_note: text(f, "special_note", 4000),
+    just_call_number: storeLine, code_sender_number: codeSender, agent_code_number: text(f, "agent_code_number", 40), special_note: text(f, "special_note", 4000),
     active: f.get("active") !== null || !id, updated_at: new Date().toISOString(),
   };
   const client = db();

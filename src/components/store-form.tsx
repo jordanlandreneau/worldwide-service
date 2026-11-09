@@ -24,8 +24,12 @@ export function StoreFields({ s, serviceLine }: { s?: Record<string, any>; servi
         {input("website", "Website", s?.website, "https://")}
       </div>
       <div className="cc-form-grid">
-        {input("just_call_number", "JustCall number (store line)", s?.just_call_number, "Codes sent to this number show on Codes")}
+        {input("just_call_number", "JustCall number codes are sent to (store line)", s?.just_call_number, "The JustCall line that receives this store's codes")}
         {input("service_just_call_number", "JustCall number (Service line)", serviceLine, "If Service has its own line")}
+      </div>
+      <div className="cc-form-grid">
+        {input("code_sender_number", "Number codes are routed from", s?.code_sender_number, "The CRM's or forwarder's number the code texts come from")}
+        <span />
       </div>
       <div className="cc-form-grid">
         {input("agent_code_number", "Agent code number", s?.agent_code_number)}

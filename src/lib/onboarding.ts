@@ -181,7 +181,7 @@ export async function importOnboarding(f: Form): Promise<{ ok: true; storeId: st
     to, subject: title,
     html: `<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5">
       <p>${result === "created" ? `A Service onboarding form came in for <strong>${escapeHtml(name)}</strong>, so the store and its Service Data page were created. It's saved as <strong>inactive</strong> until someone reviews it.` : `A Service onboarding form came in for <strong>${escapeHtml(name)}</strong>. Blank Service Data answers were filled in; nothing already entered was changed.`}</p>
-      <p>Still to do: address and time zone${str(f.crm_username) ? ", and the CRM password (it isn't copied over)" : ""}.</p>
+      <p>Still to do: address, time zone, the JustCall numbers for codes${str(f.crm_username) ? ", and the CRM password (it isn't copied over)" : ""}.</p>
       <p><a href="${SITE_URL}${link}" style="display:inline-block;background:#1f5fbf;color:#fff;padding:9px 16px;border-radius:3px;text-decoration:none">Review the store</a></p>
     </div>`,
   }).catch(() => false);

@@ -36,10 +36,12 @@ export function extractCode(body: string): string | null {
   return nearby?.[1] ?? body.match(/\b\d{4,8}\b/)?.[0] ?? null;
 }
 
+const senderKey = (v: string | null | undefined) => { const d = String(v ?? "").replace(/\D/g, ""); return d.length >= 5 ? d.slice(-10) : ""; };
+
 // All lines on the dealership pages. A number shared by several stores has no single owner.
 async function dealershipLines() {
   const [stores, links] = await Promise.all([
-    fetchAll<any>("dealerships", "id,just_call_number", "id"),
+    fetchAll<any>("dealerships", "id,just_call_number,code_sender_number", "id"),
     fetchAll<any>("dealership_departments", "dealership_id,just_call_number", "dealership_id"),
   ]);
   const owners = new Map<string, Set<string>>();
@@ -49,7 +51,13 @@ async function dealershipLines() {
   };
   for (const s of stores) add(s.just_call_number, s.id);
   for (const l of links) add(l.just_call_number, l.dealership_id);
-  return owners;
+  // Sender numbers: short codes keep all their digits, phone numbers use the last 10.
+  const senders = new Map<string, Set<string>>();
+  for (const s of stores) {
+    const k = senderKey(s.code_sender_number);
+    if (k) senders.set(k, (senders.get(k) ?? new Set()).add(s.id));
+  }
+  return { owners, senders };
 }
 
 const MIN_GAP_MS = 30_000;
@@ -70,7 +78,7 @@ export async function syncCodes(): Promise<{ added: number; skipped?: boolean; e
   let newest = lastId;
   let added = 0;
   try {
-    const owners = await dealershipLines();
+    const { owners, senders } = await dealershipLines();
     for (let page = 0; page < MAX_PAGES; page++) {
       const res = await justcall(`/texts?sms_direction=incoming&sort=id&order=desc&per_page=100&page=${page}`, undefined, 0);
       if (!res.ok) {
@@ -85,7 +93,11 @@ export async function syncCodes(): Promise<{ added: number; skipped?: boolean; e
         const id = Number(sms.id);
         if (id <= lastId) { reachedKnown = true; continue; }
         newest = Math.max(newest, id);
-        const line = owners.get(lineKey(sms.justcall_number));
+        // The JustCall line it arrived on decides the store; a known sender number settles a shared line.
+        const byLine = owners.get(lineKey(sms.justcall_number));
+        const bySender = senders.get(senderKey(sms.contact_number));
+        const both = byLine && bySender ? new Set([...byLine].filter((x) => bySender.has(x))) : null;
+        const line = both?.size ? both : byLine?.size === 1 ? byLine : bySender ?? byLine;
         const body = String(sms.sms_info?.body ?? "");
         const code = line ? extractCode(body) : null;
         const when = `${sms.sms_date ?? ""}T${sms.sms_time ?? "00:00:00"}Z`;
