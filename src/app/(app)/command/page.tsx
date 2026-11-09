@@ -6,6 +6,7 @@ import { StorePicker } from "@/components/store-picker";
 import { Card, Table } from "@/components/ui";
 import { addStat, deleteCampaign, deleteList, deleteStat, saveCampaign, setListTask, toggleWave, uploadList } from "@/lib/command";
 import { assignmentsFor, serviceAgents, type Agent } from "@/lib/assignments";
+import { progressFor } from "@/lib/list-work";
 import { db, fetchAll } from "@/lib/data";
 import { atLeast } from "@/lib/access";
 import { localParts, requireScoped, showLocal } from "@/lib/scope";
@@ -37,24 +38,33 @@ function StatCard({ label, icon, value, of, note, tone, bar }: { label: string; 
   );
 }
 
-// Deadline and owner for a campaign task or a calling sheet. Times are the store's local time.
+// Deadline and agents for one calling sheet (CSV). Times are the store's local time.
 type TaskCtx = { tz: string; agents: Agent[]; canAssign: boolean };
-function TaskFields({ dueAt, assignedTo, ctx }: { dueAt?: string | null; assignedTo?: string | null; ctx: TaskCtx }) {
+function TaskFields({ dueAt, assigned = [], ctx }: { dueAt?: string | null; assigned?: string[]; ctx: TaskCtx }) {
   const local = dueAt ? localParts(dueAt, ctx.tz) : null;
   const zone = new Date().toLocaleTimeString("en-US", { timeZone: ctx.tz, timeZoneName: "short" }).split(" ").pop();
+  const on = new Set(assigned);
+  const teams = [...new Set(ctx.agents.map((a) => a.team ?? "No team"))].sort();
   return (
-    <div className="cc-form-grid">
-      <Field label="Due date (optional)"><input className="x-input" type="date" name="due_date" defaultValue={local?.date ?? ""} /></Field>
-      <Field label={`Due time (${zone}, store time)`}><input className="x-input" type="time" name="due_time" defaultValue={local?.time ?? "17:00"} /></Field>
+    <>
+      <div className="cc-form-grid">
+        <Field label="List due date (optional)"><input className="x-input" type="date" name="due_date" defaultValue={local?.date ?? ""} /></Field>
+        <Field label={`Due time (${zone}, store time)`}><input className="x-input" type="time" name="due_time" defaultValue={local?.time ?? "17:00"} /></Field>
+      </div>
       {ctx.canAssign && (
-        <Field label="Assign to an agent (optional)">
-          <select className="x-input" name="assigned_to" defaultValue={assignedTo ?? ""}>
-            <option value="">Nobody yet</option>
-            {ctx.agents.map((a) => <option key={a.id} value={a.id}>{a.name}{a.team ? ` · ${a.team}` : ""}</option>)}
-          </select>
-        </Field>
+        <fieldset className="cc-agents">
+          <legend>Agents working this list (optional)</legend>
+          {teams.map((t) => (
+            <div key={t} className="cc-agents-team">
+              <small>{t}</small>
+              {ctx.agents.filter((a) => (a.team ?? "No team") === t).map((a) => (
+                <label key={a.id}><input type="checkbox" name="agents" value={a.id} defaultChecked={on.has(a.id)} /> {a.name}</label>
+              ))}
+            </div>
+          ))}
+        </fieldset>
       )}
-    </div>
+    </>
   );
 }
 
@@ -79,18 +89,19 @@ function CampaignFields({ c, category, categories, ctx }: { c?: Campaign; catego
       {input("cadence", "Cadence", c?.cadence, "e.g. 500, DAILY, Weekly")}
       {input("list_ref", "List / sheet", c?.list_ref, "Where the list comes from")}
       {input("launch_date", "Launch date", c?.launch_date, "e.g. November 4th")}
-      <TaskFields dueAt={c?.due_at} assignedTo={c?.assigned_to} ctx={ctx} />
       {area("script", "Script", c?.script)}
       {area("info", "Information", c?.info)}
       <Field label={c ? "Add a CSV list (optional)" : "CSV list (optional)"}><input className="x-input" type="file" name="file" accept=".csv,text/csv" style={{ paddingTop: 8 }} /></Field>
       <Field label="List note (optional)"><input className="x-input" name="list_note" placeholder="e.g. November recall list" /></Field>
+      <p className="text-sm text-ink-muted" style={{ margin: "-4px 0 8px" }}>The due date and agents below apply to this CSV only.</p>
+      <TaskFields ctx={ctx} />
     </>
   );
 }
 
-export default async function CommandCenter({ searchParams }: { searchParams: Promise<{ d?: string; tab?: string; q?: string; cat?: string; status?: string; from?: string; to?: string; campaign?: string; mine?: string }> }) {
+export default async function CommandCenter({ searchParams }: { searchParams: Promise<{ d?: string; tab?: string; q?: string; cat?: string; status?: string; from?: string; to?: string; campaign?: string }> }) {
   const { user, stores: scope } = await requireScoped();
-  const { d, tab: rawTab = "matrix", q = "", cat = "", status = "", from = "", to = "", campaign: pick = "", mine = "" } = await searchParams;
+  const { d, tab: rawTab = "matrix", q = "", cat = "", status = "", from = "", to = "", campaign: pick = "" } = await searchParams;
   const tab = TABS.some(([k]) => k === rawTab) ? rawTab : "matrix";
   const stores = (await fetchAll<any>("dealerships", "id,name,active,timezone", "name")).filter((s: any) => s.active !== false && (scope === null || scope.includes(s.id))) as { id: string; name: string; timezone: string | null }[];
   const store = stores.find((s) => s.id === d) ?? stores[0];
@@ -114,11 +125,18 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
   ]);
   const ctx: TaskCtx = { tz, agents, canAssign: staff };
   const agentName = new Map(agents.map((a) => [a.id, a.name]));
-  const who = (id: string | null) => (id ? agentName.get(id) ?? "An agent" : null);
-  const wavesDone = (c: Campaign) => c.wave1_done && c.wave2_done;
   const campaigns = (c1 ?? []) as Campaign[];
   const stats = (s1 ?? []) as Stat[];
   const lists = (l1 ?? []) as List[];
+  // Who works each sheet, and how many of its customers have an outcome.
+  const listIds = lists.map((l) => l.id);
+  const [{ data: la }, prog] = await Promise.all([
+    listIds.length ? client.from("list_assignments").select("list_id,user_id").in("list_id", listIds) : Promise.resolve({ data: [] }),
+    progressFor(listIds),
+  ]);
+  const listAgents = new Map<string, { id: string; name: string }[]>();
+  for (const r of (la ?? []) as any[]) listAgents.set(r.list_id, [...(listAgents.get(r.list_id) ?? []), { id: r.user_id, name: String(agentName.get(r.user_id) ?? "Agent") }]);
+  const listDone = new Map([...prog.entries()].map(([k, v]) => [k, v.done + v.retry]));
   const categories = [...new Set(campaigns.map((c) => c.category))];
   const names = new Map(campaigns.map((c) => [c.id, c.name]));
   const href = (extra: Record<string, string>) => `/command?${new URLSearchParams({ d: store.id, tab, ...extra })}`;
@@ -135,16 +153,13 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
   if (tab === "matrix") {
     const term = q.trim().toLowerCase();
     const shown = campaigns
-      .filter((c) => !mine || c.assigned_to === user.id)
       .filter((c) => !cat || c.category === cat)
       .filter((c) => status === "open" ? !(c.wave1_done && c.wave2_done) : status === "done" ? c.wave1_done && c.wave2_done : status === "w1" ? c.wave1_done && !c.wave2_done : true)
       .filter((c) => !term || [c.name, c.category, c.description, c.list_ref, c.cadence, c.info].some((v) => (v ?? "").toLowerCase().includes(term)));
-    const groups = categories.map((k) => [k, shown.filter((c) => c.category === k)] as const).filter(([, list]) => list.length > 0 || (!term && !status && !cat && !mine));
-    const myCampaigns = campaigns.filter((c) => user.id && c.assigned_to === user.id && !wavesDone(c));
-    const myLists = lists.filter((l) => user.id && l.assigned_to === user.id);
+    const groups = categories.map((k) => [k, shown.filter((c) => c.category === k)] as const).filter(([, list]) => list.length > 0 || (!term && !status && !cat));
+    const myLists = lists.filter((l) => user.id && (listAgents.get(l.id) ?? []).some((a) => a.id === user.id));
     const upcoming = [
-      ...campaigns.filter((c) => c.due_at && !wavesDone(c)).map((c) => ({ key: c.id, at: c.due_at as string, label: `${c.category} · ${c.name}`, owner: who(c.assigned_to), href: href({ q: c.name }) })),
-      ...lists.filter((l) => l.due_at).map((l) => ({ key: l.id, at: l.due_at as string, label: `Calling sheet: ${l.file_name}`, owner: who(l.assigned_to), href: `/command-lists/${l.id}` })),
+      ...lists.filter((l) => l.due_at && (listDone.get(l.id) ?? 0) < l.row_count).map((l) => ({ key: l.id, at: l.due_at as string, label: `${l.file_name}${l.campaign_id ? ` · ${names.get(l.campaign_id) ?? ""}` : ""}`, owner: (listAgents.get(l.id) ?? []).map((a) => a.name).join(", ") || null, href: worldwide ? `/my-work/list/${l.id}` : `/command-lists/${l.id}` })),
     ].filter((x) => new Date(x.at).getTime() > Date.now() - 7 * 86400000).sort((a, b) => a.at.localeCompare(b.at)).slice(0, 8);
     body = (
       <>
@@ -154,18 +169,17 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
           <input className="x-input cc-search" name="q" defaultValue={q} placeholder="Search segment, list, notes…" aria-label="Search" />
           <label>Category <select className="x-input" name="cat" defaultValue={cat}><option value="">All Categories ({categories.length})</option>{categories.map((k) => <option key={k} value={k}>{k}</option>)}</select></label>
           <label>Status <select className="x-input" name="status" defaultValue={status}><option value="">All Items</option><option value="open">Not finished</option><option value="w1">Wave 1 only</option><option value="done">Both waves done</option></select></label>
-          {worldwide && user.id && <label className="cc-check"><input type="checkbox" name="mine" value="1" defaultChecked={!!mine} /> Assigned to me</label>}
           <button className="x-btn">Apply</button>
         </form>
-        {(myCampaigns.length > 0 || myLists.length > 0) && !mine && (
+        {myLists.length > 0 && (
           <div className="cc-mine" role="note">
             <UserRound size={16} aria-hidden />
-            <span><strong>Assigned to you:</strong> {myCampaigns.length} {myCampaigns.length === 1 ? "campaign" : "campaigns"} and {myLists.length} calling {myLists.length === 1 ? "sheet" : "sheets"}.</span>
-            <Link className="x-btn" href={href({ mine: "1" })}>Show mine</Link>
+            <span><strong>Assigned to you:</strong> {myLists.length} calling {myLists.length === 1 ? "sheet" : "sheets"} at this store.</span>
+            <Link className="x-btn" href="/my-work">Open My Work</Link>
           </div>
         )}
         {upcoming.length > 0 && (
-          <Card title="Deadlines" note={`Store time (${tz.replace(/_/g, " ")}). Campaigns drop off once both waves are done.`}>
+          <Card title="List deadlines" note={`Store time (${tz.replace(/_/g, " ")}). A list drops off once every customer on it has an outcome.`}>
             <ul className="cc-deadlines">
               {upcoming.map((x) => {
                 const late = new Date(x.at).getTime() < Date.now();
@@ -192,8 +206,6 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
                       <strong>{c.name}</strong>
                       {c.cadence && <span className="cc-badge" data-tone="amber">Cadence: {c.cadence}</span>}
                       {c.launch_date && <span className="cc-badge" data-tone="blue"><CalendarDays size={13} aria-hidden /> {c.launch_date}</span>}
-                      <DueBadge at={c.due_at} done={wavesDone(c)} tz={tz} />
-                      {c.assigned_to && <span className="cc-badge" data-tone={c.assigned_to === user.id ? "violet" : "slate"}><UserRound size={13} aria-hidden /> {c.assigned_to === user.id ? "You" : who(c.assigned_to)}</span>}
                     </div>
                     {(c.description || c.list_ref) && (
                       <p className="cc-row-meta">
@@ -204,7 +216,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
                     {lists.some((l) => l.campaign_id === c.id) && (
                       <p className="cc-row-meta">
                         <span>Lists:</span>{" "}
-                        {lists.filter((l) => l.campaign_id === c.id).map((l, i) => <span key={l.id}>{i > 0 && " · "}<a className="text-accent" href={`/command-lists/${l.id}`}>{l.file_name}</a> ({l.row_count.toLocaleString()})</span>)}
+                        {lists.filter((l) => l.campaign_id === c.id).map((l, i) => <span key={l.id}>{i > 0 && " · "}<a className="text-accent" href={worldwide ? `/my-work/list/${l.id}` : `/command-lists/${l.id}`}>{l.file_name}</a> ({(listDone.get(l.id) ?? 0).toLocaleString()}/{l.row_count.toLocaleString()} worked{(listAgents.get(l.id) ?? []).length ? ` · ${(listAgents.get(l.id) ?? []).map((a) => a.name).join(", ")}` : ""}){l.due_at && <> <DueBadge at={l.due_at} done={(listDone.get(l.id) ?? 0) >= l.row_count} tz={tz} /></>}</span>)}
                       </p>
                     )}
                     {(c.script || c.info) && (
@@ -257,8 +269,8 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
     const tally = (id: string) => { let t = per.get(id); if (!t) { t = { calls: 0, entered: 0, site: 0, last: null }; per.set(id, t); } return t; };
     for (const s of inRange) { const t = tally(s.campaign_id); t.calls += s.calls_made; t.entered += s.appointments_set; if (!t.last || s.stat_date > t.last) t.last = s.stat_date; }
     for (const a of setInRange) { if (!a.campaign_id) continue; const t = tally(a.campaign_id); t.site += 1; if (!t.last || a.day > t.last) t.last = a.day; }
-    const listTotals = new Map<string, { files: number; rows: number }>();
-    for (const l of lists) { if (!l.campaign_id) continue; const t = listTotals.get(l.campaign_id) ?? { files: 0, rows: 0 }; t.files += 1; t.rows += l.row_count; listTotals.set(l.campaign_id, t); }
+    const listTotals = new Map<string, { files: number; rows: number; worked: number }>();
+    for (const l of lists) { if (!l.campaign_id) continue; const t = listTotals.get(l.campaign_id) ?? { files: 0, rows: 0, worked: 0 }; t.files += 1; t.rows += l.row_count; t.worked += listDone.get(l.id) ?? 0; listTotals.set(l.campaign_id, t); }
 
     // The stat cards follow the campaign filter.
     const scopedStats = chosen ? inRange.filter((s) => s.campaign_id === chosen.id) : inRange;
@@ -268,7 +280,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
     const week = new Date(Date.now() - 6 * 86400000).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
     const recent = (chosen ? stats.filter((s) => s.campaign_id === chosen.id) : stats).filter((s) => s.stat_date >= week);
     const recentAppts = recent.reduce((a, s) => a + s.appointments_set, 0) + (chosen ? setOn.filter((a) => a.campaign_id === chosen.id) : setOn).filter((a) => a.day >= week).length;
-    const rows = campaigns.map((c) => ({ c, t: per.get(c.id) ?? { calls: 0, entered: 0, site: 0, last: null }, l: listTotals.get(c.id) ?? { files: 0, rows: 0 } }))
+    const rows = campaigns.map((c) => ({ c, t: per.get(c.id) ?? { calls: 0, entered: 0, site: 0, last: null }, l: listTotals.get(c.id) ?? { files: 0, rows: 0, worked: 0 } }))
       .sort((x, y) => (y.t.entered + y.t.site) - (x.t.entered + x.t.site) || y.t.calls - x.t.calls);
     const unlinked = setInRange.filter((a) => !a.campaign_id).length;
     const top = Math.max(1, ...rows.map((r) => r.t.calls));
@@ -295,11 +307,11 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
           <StatCard label="Appointments" icon={<CalendarDays size={18} aria-hidden />} value={appts} note={calls ? `${pct(appts, calls)}% of calls set an appointment` : "All appointments set"} tone="green" bar={pct(appts, calls)} />
           <StatCard label="Last 7 days" icon={<Clock size={18} aria-hidden />} value={recent.reduce((a, s) => a + s.calls_made, 0)} note={`${recentAppts} appointments`} tone="blue" bar={100} />
           {chosen
-            ? <StatCard label="Customers on lists" icon={<FileSpreadsheet size={18} aria-hidden />} value={(listTotals.get(chosen.id)?.rows ?? 0)} note={`${listTotals.get(chosen.id)?.files ?? 0} calling sheets`} tone="violet" bar={pct(calls, listTotals.get(chosen.id)?.rows ?? 0)} />
+            ? <StatCard label="Customers on lists" icon={<FileSpreadsheet size={18} aria-hidden />} value={(listTotals.get(chosen.id)?.rows ?? 0)} note={`${listTotals.get(chosen.id)?.files ?? 0} calling sheets · ${(listTotals.get(chosen.id)?.worked ?? 0).toLocaleString()} worked`} tone="violet" bar={pct(listTotals.get(chosen.id)?.worked ?? 0, listTotals.get(chosen.id)?.rows ?? 0)} />
             : <StatCard label="Campaigns finished" icon={<ShieldCheck size={18} aria-hidden />} value={both} of={total} note={`${pct(both, total)}% have both waves done`} tone="violet" bar={pct(both, total)} />}
         </div>
         {chosen ? (
-          <Card title={`${chosen.name} by day`} note={`${chosen.category}${chosen.assigned_to ? ` · ${who(chosen.assigned_to)}` : ""}${chosen.due_at ? ` · due ${showLocal(chosen.due_at, tz)}` : ""}`}>
+          <Card title={`${chosen.name} by day`} note={chosen.category}>
             <Table
               head={["Date", "Calls", "Appointments entered", "Set on the site", "Total appointments", "Conversion"]}
               empty="No activity on this campaign in these dates."
@@ -311,28 +323,26 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
             {!campaigns.length ? <p className="text-sm text-ink-muted">No campaigns yet.</p> : (
               <div className="cc-table-scroll">
                 <table className="cc-ctable">
-                  <thead><tr><th>Campaign</th><th>Agent</th><th>Due</th><th className="num">Calls</th><th className="num">Entered</th><th className="num">On site</th><th className="num">Total</th><th>Conversion</th><th className="num">Customers</th><th>Last activity</th><th>Waves</th></tr></thead>
+                  <thead><tr><th>Campaign</th><th className="num">Calls</th><th className="num">Entered</th><th className="num">On site</th><th className="num">Total</th><th>Conversion</th><th className="num">Worked / customers</th><th>Last activity</th><th>Waves</th></tr></thead>
                   <tbody>
                     {rows.map(({ c, t, l }) => {
                       const tot = t.entered + t.site;
                       return (
                         <tr key={c.id}>
                           <td><Link className="text-accent" href={href({ campaign: c.id, ...(from ? { from } : {}), ...(to ? { to } : {}) })}><strong>{c.name}</strong></Link><small>{c.category}</small></td>
-                          <td>{who(c.assigned_to) ?? "—"}</td>
-                          <td>{c.due_at ? <DueBadge at={c.due_at} done={wavesDone(c)} tz={tz} /> : "—"}</td>
                           <td className="num">{t.calls.toLocaleString()}</td>
                           <td className="num">{t.entered}</td>
                           <td className="num">{t.site}</td>
                           <td className="num"><strong>{tot}</strong></td>
                           <td><span className="cc-conv"><i style={{ width: `${(t.calls / top) * 100}%` }}><b style={{ width: `${t.calls ? Math.min(100, (tot / t.calls) * 100) : 0}%` }} /></i>{t.calls ? `${pct(tot, t.calls)}%` : "—"}</span></td>
-                          <td className="num">{l.rows ? `${l.rows.toLocaleString()} (${l.files})` : "—"}</td>
+                          <td className="num">{l.rows ? `${l.worked.toLocaleString()} / ${l.rows.toLocaleString()}` : "—"}</td>
                           <td>{t.last ? day(t.last) : "—"}</td>
                           <td><span className="cc-pill" data-on={c.wave1_done}>W1</span> <span className="cc-pill" data-on={c.wave2_done} data-wave="2">W2</span></td>
                         </tr>
                       );
                     })}
                   </tbody>
-                  <tfoot><tr><td>All campaigns</td><td /><td /><td className="num">{rows.reduce((a, r) => a + r.t.calls, 0).toLocaleString()}</td><td className="num">{rows.reduce((a, r) => a + r.t.entered, 0)}</td><td className="num">{rows.reduce((a, r) => a + r.t.site, 0)}</td><td className="num"><strong>{rows.reduce((a, r) => a + r.t.entered + r.t.site, 0)}</strong></td><td /><td /><td /><td /></tr></tfoot>
+                  <tfoot><tr><td>All campaigns</td><td className="num">{rows.reduce((a, r) => a + r.t.calls, 0).toLocaleString()}</td><td className="num">{rows.reduce((a, r) => a + r.t.entered, 0)}</td><td className="num">{rows.reduce((a, r) => a + r.t.site, 0)}</td><td className="num"><strong>{rows.reduce((a, r) => a + r.t.entered + r.t.site, 0)}</strong></td><td /><td /><td /><td /></tr></tfoot>
                 </table>
               </div>
             )}
@@ -391,19 +401,27 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
         </Card>}
         <Card title="Uploaded lists">
           <Table
-            head={["File", "Campaign", "Customers", "Due", ...(worldwide ? ["Agent"] : []), "Note", "Uploaded by", "When", ""]}
+            head={["File", "Campaign", "Customers", "Worked", "Due", ...(worldwide ? ["Agents"] : []), "Note", "Uploaded", ""]}
             empty="No lists uploaded yet."
-            rows={lists.map((l) => [
-              <a key="f" className="text-accent" href={`/command-lists/${l.id}`}>{l.file_name}</a>,
+            rows={lists.map((l) => {
+              const ag = listAgents.get(l.id) ?? [];
+              const done = listDone.get(l.id) ?? 0;
+              const mineToo = ag.some((a) => a.id === user.id);
+              return [
+              <a key="f" className="text-accent" href={worldwide ? `/my-work/list/${l.id}` : `/command-lists/${l.id}`}>{l.file_name}</a>,
               l.campaign_id ? names.get(l.campaign_id) ?? "—" : "—",
               l.row_count.toLocaleString(),
-              l.due_at ? <DueBadge key="d" at={l.due_at} tz={tz} /> : "—",
-              ...(worldwide ? [l.assigned_to ? (l.assigned_to === user.id ? "You" : who(l.assigned_to)) : "—"] : []),
-              l.note ?? "—", l.uploaded_by, when(l.uploaded_at),
-              <span key="a" className="x-filters"><a className="x-btn" href={`/command-lists/${l.id}`} style={{ display: "inline-flex", alignItems: "center" }}>Download</a>
-                {staff && <ModalForm button="Assign" title={`Deadline and agent for ${l.file_name}`} submit="Save" action={setListTask.bind(null, store.id, l.id)}><TaskFields dueAt={l.due_at} assignedTo={l.assigned_to} ctx={ctx} /></ModalForm>}
+              <span key="w" className="cc-conv"><i><b style={{ width: `${pct(done, l.row_count)}%` }} /></i>{pct(done, l.row_count)}%</span>,
+              l.due_at ? <DueBadge key="d" at={l.due_at} done={done >= l.row_count} tz={tz} /> : "—",
+              ...(worldwide ? [ag.length ? ag.map((a) => (a.id === user.id ? "You" : a.name)).join(", ") : "—"] : []),
+              l.note ?? "—", <span key="u">{when(l.uploaded_at)}<small style={{ display: "block", color: "var(--ink-muted)" }}>{l.uploaded_by}</small></span>,
+              <span key="a" className="x-filters">
+                {worldwide && (staff || mineToo) && <Link className="x-btn x-btn-primary" href={`/my-work/list/${l.id}`} style={{ display: "inline-flex", alignItems: "center" }}>{done ? "Continue" : "Start"}</Link>}
+                <a className="x-btn" href={`/command-lists/${l.id}`} style={{ display: "inline-flex", alignItems: "center" }}>Download</a>
+                {staff && <ModalForm button="Assign" title={`Due date and agents for ${l.file_name}`} submit="Save" action={setListTask.bind(null, store.id, l.id)}><TaskFields dueAt={l.due_at} assigned={ag.map((a) => a.id)} ctx={ctx} /></ModalForm>}
                 {staff && <ActionButton label="Delete" confirm={`Delete ${l.file_name}?`} action={deleteList.bind(null, store.id, l.id)} />}</span>,
-            ])}
+              ];
+            })}
           />
         </Card>
       </>
@@ -420,7 +438,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
           {worldwide && (
             <p className="cc-assigned">
               <Users size={14} aria-hidden /> On this store:{" "}
-              {assigned.length ? assigned.map((a, i) => <span key={a.id}>{i > 0 && ", "}{a.name}{a.dueAt ? ` (due ${showLocal(a.dueAt, tz)})` : ""}</span>) : <em>nobody assigned yet</em>}
+              {assigned.length ? assigned.map((a, i) => <span key={a.id}>{i > 0 && ", "}{a.name}</span>) : <em>nobody assigned yet</em>}
               {staff && <> · <Link className="text-accent" href={`/stores/${store.id}#assigned`}>Manage</Link></>}
             </p>
           )}

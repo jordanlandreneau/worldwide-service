@@ -15,7 +15,7 @@ export function Page({ title, subtitle, actions, children }: { title: string; su
   );
 }
 
-export function Card({ title, note, children }: { title?: string; note?: ReactNode; children: ReactNode }) {
+export function Card({ title, note, children }: { title?: ReactNode; note?: ReactNode; children: ReactNode }) {
   return (
     <section className="x-card">
       {title && (

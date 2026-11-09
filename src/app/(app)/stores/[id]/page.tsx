@@ -7,7 +7,6 @@ import { Card, Page, Table } from "@/components/ui";
 import { isServiceTeam, requireUser } from "@/lib/access";
 import { addAssignment, removeAssignment } from "@/lib/assign-actions";
 import { assignmentsFor, serviceAgents } from "@/lib/assignments";
-import { showLocal } from "@/lib/scope";
 import { db } from "@/lib/data";
 import { deleteServiceLogin, saveServiceHours, saveServiceLogin, saveStore } from "@/lib/stores";
 
@@ -32,7 +31,6 @@ export default async function StorePage({ params, searchParams }: { params: Prom
     dept ? client.from("crm_credentials").select("id,crm_type,username,login_url,has_password").eq("dealership_id", id).eq("department_id", dept.id) : Promise.resolve({ data: [] as any[] }),
     client.from("service_profiles").select("data").eq("dealership_id", id).maybeSingle(),
   ]);
-  const tz = (store as any).timezone || "America/New_York";
   const [assigned, agents, { data: teamRows }] = await Promise.all([assignmentsFor(id), serviceAgents(), client.from("teams").select("id,name").order("name")]);
   const serviceTeams = ((teamRows ?? []) as any[]).filter((t) => isServiceTeam(t.name));
   const taken = new Set(assigned.map((a) => `${a.kind}:${a.refId}`));
@@ -69,7 +67,7 @@ export default async function StorePage({ params, searchParams }: { params: Prom
           <StoreFields s={store} serviceLine={(line as any)?.just_call_number ?? null} />
         </InlineForm>
       </Card>
-      <Card title="Assigned agents & teams" note="Who works this store. They get a popup and an email when the store uploads a calling sheet, and see the store's deadlines. A deadline here is in the store's time.">
+      <Card title="Assigned agents & teams" note="Who works this store. They get a popup and an email when the store uploads a calling sheet. Due dates and agents for a specific list are set on that list in the Command Center.">
         <div id="assigned" />
         {assigned.length ? (
           <ul className="sa-list">
@@ -77,7 +75,6 @@ export default async function StorePage({ params, searchParams }: { params: Prom
               <li key={a.id}>
                 <span className="sa-kind">{a.kind === "team" ? "Team" : "Agent"}</span>
                 <strong>{a.name}</strong>
-                {a.dueAt && <span className="cc-badge" data-tone={new Date(a.dueAt).getTime() < Date.now() ? "red" : "slate"}>Due {showLocal(a.dueAt, tz)}</span>}
                 {a.note && <span className="sa-note">{a.note}</span>}
                 <ActionButton label="Remove" confirm={`Take ${a.name} off this store?`} action={removeAssignment.bind(null, id, a.id)} />
               </li>
@@ -93,10 +90,8 @@ export default async function StorePage({ params, searchParams }: { params: Prom
                 <optgroup label="Whole team">{serviceTeams.filter((t) => !taken.has(`team:${t.id}`)).map((t) => <option key={t.id} value={`team:${t.id}`}>{t.name}</option>)}</optgroup>
               </select>
             </Field>
-            <Field label="Deadline date (optional)"><input className="x-input" type="date" name="due_date" /></Field>
-            <Field label="Deadline time (store time)"><input className="x-input" type="time" name="due_time" defaultValue="17:00" /></Field>
           </div>
-          <Field label="What they need to do (optional)"><input className="x-input" name="note" maxLength={500} placeholder="e.g. Finish the November recall list" /></Field>
+          <Field label="What they need to do (optional)"><input className="x-input" name="note" maxLength={500} placeholder="e.g. Primary agent for scheduling" /></Field>
         </InlineForm>
       </Card>
       <Card title="Service CRM login" note="Shown on the store's Service Data page. Passwords are encrypted.">

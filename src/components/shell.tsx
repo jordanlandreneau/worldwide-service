@@ -11,6 +11,7 @@ import type { Role } from "@/lib/access";
 // Service site menu (carried over from Worldwide Service's Service section).
 const GROUPS: { label: string; items: { label: string; href: string; icon: typeof Info; min: Role; not?: Role }[] }[] = [
   { label: "Service", items: [
+    { label: "My Work", href: "/my-work", icon: ClipboardCheck, min: "agent" },
     { label: "Command Center", href: "/command", icon: Gauge, min: "dealership" },
     { label: "Service Data", href: "/service/info", icon: CircleHelp, min: "dealership" },
     { label: "Follow-ups", href: "/follow-up", icon: Send, min: "agent" },

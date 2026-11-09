@@ -34,7 +34,24 @@ function readDue(f: FormData, tz: string, prefix = "due"): { at: string | null; 
   return { at: at.toISOString(), text: showLocal(at.toISOString(), tz) };
 }
 const sameTime = (a: string | null | undefined, b: string | null | undefined) => (a ? new Date(a).getTime() : 0) === (b ? new Date(b).getTime() : 0);
-const readAgent = (f: FormData, key = "assigned_to") => { const v = text(f, key, 64); return v && UUID.test(v) ? v : null; };
+// The agents picked for a calling sheet (checkboxes named "agents").
+const readAgents = (f: FormData) => [...new Set(f.getAll("agents").map(String).filter((v) => UUID.test(v)))].slice(0, 50);
+
+// Puts exactly these agents on a sheet and tells the ones who are new to it (or everyone, if the deadline moved).
+async function assignList(p: { storeId: string; storeName: string; listId: string; fileName: string; rows: number; agents: string[]; dueText: string | null; dueChanged: boolean; by: { email: string; name: string } }) {
+  const client = db();
+  const { data: now } = await client.from("list_assignments").select("user_id").eq("list_id", p.listId);
+  const had = new Set(((now ?? []) as any[]).map((r) => r.user_id as string));
+  const keep = new Set(p.agents);
+  const drop = [...had].filter((u) => !keep.has(u));
+  if (drop.length) await client.from("list_assignments").delete().eq("list_id", p.listId).in("user_id", drop);
+  const add = p.agents.filter((u) => !had.has(u));
+  if (add.length) await client.from("list_assignments").insert(add.map((user_id) => ({ list_id: p.listId, user_id, assigned_by: p.by.email })));
+  const tell = p.dueChanged ? p.agents : add;
+  for (const userId of tell) {
+    await notifyAssigned({ userId, storeId: p.storeId, storeName: p.storeName, what: `Calling sheet: ${p.fileName} (${p.rows.toLocaleString()} customers)`, dueText: p.dueText, link: `/my-work/list/${p.listId}`, by: p.by }).catch(() => undefined);
+  }
+}
 
 // Managers and admins edit the board and mark completion. Agents only view.
 // Store logins see their own stores and upload lists; they can't mark completion.
@@ -64,11 +81,8 @@ export async function saveCampaign(storeId: string, id: string | null, _: Result
   if (!category) return { error: "Enter a category." };
   if (!name) return { error: "Enter a campaign name." };
   const store = await storeInfo(storeId);
-  const due = readDue(f, store.tz);
-  if (typeof due === "string") return { error: due };
-  const assignedTo = readAgent(f);
   const fields = {
-    category, name, due_at: due.at, assigned_to: assignedTo,
+    category, name,
     description: text(f, "description"), cadence: text(f, "cadence", 120), list_ref: text(f, "list_ref"),
     launch_date: text(f, "launch_date", 120), script: text(f, "script", 20000), info: text(f, "info", 20000),
     updated_at: new Date().toISOString(),
@@ -84,10 +98,8 @@ export async function saveCampaign(storeId: string, id: string | null, _: Result
   }
   const client = db();
   const rowId = id ?? randomUUID();
-  let before: { assigned_to: string | null; due_at: string | null } | null = null;
   if (id) {
     if (!(await campaignInStore(storeId, id))) return { error: "This campaign no longer exists." };
-    before = (await client.from("campaigns").select("assigned_to,due_at").eq("id", id).maybeSingle()).data as any;
     const { error } = await client.from("campaigns").update(fields).eq("id", id).eq("dealership_id", storeId);
     if (error) return { error: "Couldn't save this campaign." };
   } else {
@@ -96,13 +108,17 @@ export async function saveCampaign(storeId: string, id: string | null, _: Result
     if (error) return { error: "Couldn't add this campaign." };
   }
   await client.from("edit_log").insert({ user_email: user.email, table_name: "campaigns", row_id: rowId, action: id ? "update campaign" : "add campaign" });
-  if (assignedTo && (assignedTo !== before?.assigned_to || !sameTime(due.at, before?.due_at))) {
-    await notifyAssigned({ userId: assignedTo, storeId, storeName: store.name, what: `Campaign: ${category} · ${name}`, dueText: due.text, link: `/command?d=${storeId}`, by: user }).catch(() => undefined);
-  }
   if (parsed && hasFile) {
-    const listId = await saveList(storeId, rowId, file.name, parsed, text(f, "list_note", 1000), user.email, due.at, assignedTo);
+    // The deadline and agents belong to the CSV, not the campaign.
+    const due = readDue(f, store.tz);
+    const dueAt = typeof due === "string" ? null : due.at;
+    const dueText = typeof due === "string" ? null : due.text;
+    const listId = await saveList(storeId, rowId, file.name, parsed, text(f, "list_note", 1000), user.email, dueAt);
     if (!listId) { refresh(); return { error: "The campaign was saved, but its list wasn't. Upload it again from the campaign." }; }
-    await notifyListUpload({ storeId, storeName: store.name, listId, fileName: file.name, rows: parsed.rows.length, campaign: name, dueText: due.text, by: { email: user.email, name: user.name, dealership: false } }).catch(() => undefined);
+    await notifyListUpload({ storeId, storeName: store.name, listId, fileName: file.name, rows: parsed.rows.length, campaign: name, dueText, by: { email: user.email, name: user.name, dealership: false } }).catch(() => undefined);
+    const agents = readAgents(f);
+    if (agents.length) await assignList({ storeId, storeName: store.name, listId, fileName: file.name, rows: parsed.rows.length, agents, dueText, dueChanged: false, by: user });
+    if (typeof due === "string") { refresh(); return { error: `The campaign and list were saved, but not the due date: ${due}` }; }
   }
   refresh();
   return { ok: true };
@@ -191,10 +207,10 @@ async function readCsv(file: File): Promise<Parsed | string> {
   if (rows.length > MAX_ROWS) return `The file has ${rows.length.toLocaleString()} rows. The limit is ${MAX_ROWS.toLocaleString()} per file.`;
   return { columns: all[0].map((h, i) => h.trim() || `Column ${i + 1}`), rows };
 }
-async function saveList(storeId: string, campaignId: string | null, name: string, p: Parsed, note: string | null, email: string, dueAt: string | null, assignedTo: string | null) {
+async function saveList(storeId: string, campaignId: string | null, name: string, p: Parsed, note: string | null, email: string, dueAt: string | null) {
   const { data, error } = await db().from("outbound_lists").insert({
     dealership_id: storeId, campaign_id: campaignId, file_name: name.slice(0, 200), columns: p.columns, rows: p.rows,
-    row_count: p.rows.length, note, uploaded_by: email, due_at: dueAt, assigned_to: assignedTo,
+    row_count: p.rows.length, note, uploaded_by: email, due_at: dueAt,
   }).select("id").single();
   return error ? null : (data as any).id as string;
 }
@@ -211,36 +227,34 @@ export async function uploadList(storeId: string, _: Result, f: FormData): Promi
   const store = await storeInfo(storeId);
   const due = readDue(f, store.tz);
   if (typeof due === "string") return { error: due };
-  // Store logins set a deadline; only managers and admins hand the sheet to an agent.
-  const assignedTo = atLeast(user.role, "manager") ? readAgent(f) : null;
-  const listId = await saveList(storeId, campaignId, file.name, p, text(f, "note", 1000), user.email, due.at, assignedTo);
+  // Store logins set a deadline; only managers and admins hand the sheet to agents.
+  const agents = atLeast(user.role, "manager") ? readAgents(f) : [];
+  const listId = await saveList(storeId, campaignId, file.name, p, text(f, "note", 1000), user.email, due.at);
   if (!listId) return { error: "Couldn't save this list." };
   let campaign: string | null = null;
   if (campaignId) campaign = ((await db().from("campaigns").select("name").eq("id", campaignId).maybeSingle()).data as any)?.name ?? null;
   const by = { email: user.email, name: user.name, dealership: user.role === "dealership" };
   await notifyListUpload({ storeId, storeName: store.name, listId, fileName: file.name, rows: p.rows.length, campaign, dueText: due.text, by }).catch(() => undefined);
-  if (assignedTo) await notifyAssigned({ userId: assignedTo, storeId, storeName: store.name, what: `Calling sheet: ${file.name} (${p.rows.length.toLocaleString()} customers)`, dueText: due.text, link: `/command?d=${storeId}&tab=lists`, by }).catch(() => undefined);
+  if (agents.length) await assignList({ storeId, storeName: store.name, listId, fileName: file.name, rows: p.rows.length, agents, dueText: due.text, dueChanged: false, by });
   refresh();
   return { ok: true };
 }
 
-// Change who works a calling sheet and when it's due.
+// Change which agents work a calling sheet and when it's due.
 export async function setListTask(storeId: string, listId: string, _: Result, f: FormData): Promise<Result> {
   const user = await staff(storeId);
   if (!user || !UUID.test(listId)) return { error: "You don't have access to this." };
   const client = db();
-  const before = (await client.from("outbound_lists").select("file_name,row_count,assigned_to,due_at").eq("id", listId).eq("dealership_id", storeId).maybeSingle()).data as any;
+  const before = (await client.from("outbound_lists").select("file_name,row_count,due_at").eq("id", listId).eq("dealership_id", storeId).maybeSingle()).data as any;
   if (!before) return { error: "This list no longer exists." };
   const store = await storeInfo(storeId);
   const due = readDue(f, store.tz);
   if (typeof due === "string") return { error: due };
-  const assignedTo = readAgent(f);
-  const { error } = await client.from("outbound_lists").update({ due_at: due.at, assigned_to: assignedTo }).eq("id", listId);
+  const { error } = await client.from("outbound_lists").update({ due_at: due.at }).eq("id", listId);
   if (error) return { error: "Couldn't save." };
-  if (assignedTo && (assignedTo !== before.assigned_to || !sameTime(due.at, before.due_at))) {
-    await notifyAssigned({ userId: assignedTo, storeId, storeName: store.name, what: `Calling sheet: ${before.file_name} (${Number(before.row_count).toLocaleString()} customers)`, dueText: due.text, link: `/command?d=${storeId}&tab=lists`, by: user }).catch(() => undefined);
-  }
+  await assignList({ storeId, storeName: store.name, listId, fileName: before.file_name, rows: Number(before.row_count), agents: readAgents(f), dueText: due.text, dueChanged: !sameTime(due.at, before.due_at), by: user });
   refresh();
+  revalidatePath("/my-work");
   return { ok: true };
 }
 
