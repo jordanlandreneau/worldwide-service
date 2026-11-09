@@ -58,6 +58,11 @@ export default async function StorePage({ params, searchParams }: { params: Prom
       </nav>
       {tab !== "store" ? <ServiceDataEditor id={id} tab={tab} /> : (
         <>
+      {(profile?.data as any)?.onboarding && (
+        <Card title={store.active === false ? "New from the onboarding form: review before it goes live" : "Filled in from the onboarding form"}>
+          <p className="text-sm">The Service onboarding form was submitted {new Date((profile!.data as any).onboarding.submittedAt).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })}{(profile!.data as any).onboarding.by ? ` by ${(profile!.data as any).onboarding.by}` : ""}. Its answers are in General info and Contacts{store.active === false ? ". Check the address and time zone, add the CRM password under Service CRM login, then tick Active and save." : "."}</p>
+        </Card>
+      )}
       {added && <Card><p role="status" className="text-sm">Store added. Add its Service login and hours below, then fill in its Service Data (pricing, contacts, notes) with the tabs above.</p></Card>}
       <Card title="Store">
         <InlineForm action={saveStore.bind(null, id)} submit="Save store">

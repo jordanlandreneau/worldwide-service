@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     added: added || rows.length, now: until,
     messages: [
       ...rows.map((r) => ({ id: r.id, chatId: r.chat_id, chat: chat.get(r.chat_id)?.name ?? "Chat", channel: chat.get(r.chat_id)?.channel ?? "", from: r.sender_name || r.sender || "Store", body: String(r.body).slice(0, 300) })),
-      ...events.map((e) => ({ id: e.id, chatId: "", chat: e.title, channel: "event", from: e.kind === "assigned" ? "Assigned to you" : "Calling sheet", body: String(e.body ?? "").slice(0, 300), href: e.link || "/command" })),
+      ...events.map((e) => ({ id: e.id, chatId: "", chat: e.title, channel: "event", from: e.kind === "assigned" ? "Assigned to you" : e.kind === "onboarding" ? "Onboarding form" : "Calling sheet", body: String(e.body ?? "").slice(0, 300), href: e.link || "/command" })),
     ],
   });
 }
