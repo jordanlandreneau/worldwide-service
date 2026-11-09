@@ -1147,3 +1147,7 @@ span.cc-wave { cursor: default; }
 .svc-edit-details { margin-top: 14px; border-top: 1px dashed #c9d2e0; padding-top: 10px; }
 .svc-edit-details > summary { cursor: pointer; font-weight: 600; color: var(--portimao, #1c69d4); }
 .svc-add-section { border: 2px dashed #c9d2e0; }
+.svc-movable { position: relative; }
+.svc-mover { display: flex; align-items: center; gap: 6px; justify-content: flex-end; margin: 0 0 -1px; padding: 6px 8px; background: #eef2f8; border: 1px dashed #c9d2e0; border-bottom: 0; border-radius: 6px 6px 0 0; font-size: 12.5px; }
+.svc-mover span { margin-right: auto; font-weight: 600; color: #475467; }
+.svc-mover .x-btn { height: 30px; padding: 0 10px; font-size: 12.5px; }

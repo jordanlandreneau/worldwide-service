@@ -135,3 +135,19 @@ export async function moveStoreSection(id: string, sectionId: string, dir: -1 | 
   [list[i], list[j]] = [list[j], list[i]];
   await store(user.email, id, { ...data, storeSections: list }, "move store section");
 }
+
+// Moves one block of the Service Data page (Important, Hours, a section, Pricing...) up or down for this store.
+// `keys` is the page's current order; the new order is saved as sectionOrder.
+const PAGE_KEY = /^(important|logins|hours|pricing|contacts|std:[0-9a-z-]{1,60}|own:[0-9a-z-]{1,60})$/i;
+export async function movePageSection(id: string, keys: string[], key: string, dir: -1 | 1) {
+  const user = await requireUser("manager");
+  if (!Array.isArray(keys) || keys.length > 100 || !keys.every((k) => typeof k === "string" && PAGE_KEY.test(k))) return;
+  const data = await load(id);
+  if (!data) return;
+  const list = [...new Set(keys)];
+  const i = list.indexOf(key);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  await store(user.email, id, { ...data, sectionOrder: list }, "reorder page");
+}

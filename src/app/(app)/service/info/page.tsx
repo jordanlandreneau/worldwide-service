@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { clock, HoursGrid } from "@/components/hours-grid";
 import Link from "next/link";
 import { LiveClock } from "@/components/live-clock";
@@ -13,7 +13,7 @@ import { type Block, normalizeSection, STYLES } from "@/lib/blocks";
 import { atLeast } from "@/lib/access";
 import { ActionButton, Field, InlineForm, ModalForm } from "@/components/action-form";
 import { StoreSectionForm } from "@/components/store-section-form";
-import { deleteItem, deleteStoreSection, moveStoreSection, saveGeneral, saveItem, saveStoreSection, setSectionHidden } from "@/lib/service-admin";
+import { deleteItem, deleteStoreSection, movePageSection, saveGeneral, saveItem, saveStoreSection, setSectionHidden } from "@/lib/service-admin";
 
 export const metadata = { title: "Service Data · Worldwide Service" };
 
@@ -139,15 +139,102 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
   const logo = /^https:\/\//i.test(String(store?.logo_url ?? "")) ? (store!.logo_url as string) : null;
   const empty = !groups.length && !notes.length && !hours.length && !(b.pricing ?? []).length && !(b.contacts ?? []).length;
 
+
+  // Every block on the page, in its default order. Each store can reorder them (saved as sectionOrder).
+  type Piece = { key: string; label: string; alert?: boolean; anchor: string; node: ReactNode };
+  const pieces: Piece[] = [];
+  const importantNode = edit ? (<Section id="important" title="Important" alert>
+              <EditBar><ModalForm button="+ Add a note" title="Add an important note" submit="Add" action={saveItem.bind(null, id, "limitations", null)}>{noteFields()}</ModalForm></EditBar>
+              {allNotes.length ? (
+                <ul className="svc-edit-list">{allNotes.map((n: any) => (
+                  <li key={`${n.list}-${n.id}`} data-off={n.active === false}>
+                    <span className="x-prewrap">{n.text}</span>
+                    <span className="x-filters">
+                      <ModalForm button="Edit" title="Edit note" action={saveItem.bind(null, id, n.list, n.id)}>{noteFields(n)}</ModalForm>
+                      <ActionButton label="Delete" confirm="Delete this note?" action={deleteItem.bind(null, id, n.list, n.id)} />
+                    </span>
+                  </li>
+                ))}</ul>
+              ) : <p className="svc-empty">No important notes yet.</p>}
+              {store?.special_note && <p className="svc-note">Special note (from store settings): {store.special_note}</p>}
+            </Section>) : (((notes.length > 0 || store?.special_note) && (
+            <Section id="important" title="Important" alert>
+              <ul>{notes.map((n: any) => <li key={n.id} className="x-prewrap">{n.text}</li>)}{store?.special_note && <li className="x-prewrap">{store.special_note}</li>}</ul>
+            </Section>
+          )));
+  if (importantNode) pieces.push({ key: "important", label: "Important", alert: true, anchor: "important", node: importantNode });
+  if (logins.length) pieces.push({ key: "logins", label: "Logins", anchor: "logins", node: (<Section id="logins" title="Logins"><ServiceLogins credentials={logins} /></Section>) });
+  pieces.push({ key: "hours", label: "Hours", anchor: "hours", node: (
+          <Section id="hours" title="Hours">
+            <HoursGrid rows={hours} timeZone={tz} />
+            <p className="svc-note">Times are the store&apos;s local time.{edit && user.role === "admin" && <> <Link className="text-accent" href={`/stores/${id}`}>Change hours</Link></>}</p>
+          </Section>
+  ) });
+  if (edit) {
+    for (const x of [...editGroups, ...(other.length ? [{ title: "Other", keys: other, sid: null, hidden: false }] : [])]) {
+      pieces.push({ key: x.sid ? `std:${x.sid}` : `std:${slug(x.title)}`, label: x.title, anchor: slug(x.title), node: (
+<section key={x.title} id={slug(x.title)} className={`svc-section${x.hidden ? " svc-hidden" : ""}`}>
+              <div className="svc-section-head"><h2>{x.title}{x.hidden && <small className="svc-hidden-tag">Hidden on this store</small>}</h2></div>
+              <div className="svc-section-body">
+                <EditBar>
+                  {x.sid && <ActionButton label={x.hidden ? "Show on this store" : "Hide on this store"} action={setSectionHidden.bind(null, id, x.sid, !x.hidden)} />}
+                  {x.sid && <Link className="x-btn" href="/stores/sections" style={{ display: "inline-flex", alignItems: "center" }}>Rename or change questions (all stores)</Link>}
+                </EditBar>
+                {!x.hidden && (x.keys.length ? (
+                  <InlineForm action={saveGeneral.bind(null, id)} submit={`Save ${x.title}`}>
+                    <div className="svc-edit-grid">{x.keys.map((k) => box(k, fieldLabel.get(k) ?? label(k)))}</div>
+                  </InlineForm>
+                ) : <p className="svc-empty">This section has no questions yet.</p>)}
+              </div>
+            </section>
+      ) });
+    }
+  } else {
+    for (const [title, keys] of groups) {
+      const sid = allSections.find(([t]) => t === title)?.[2];
+      pieces.push({ key: sid ? `std:${sid}` : `std:${slug(title)}`, label: title, anchor: slug(title), node: (
+        <Section key={title} id={slug(title)} title={title}>
+          <Facts items={keys.map((k) => [fieldLabel.get(k) ?? label(k), <Answer key={k} k={k} value={g[k]} />])} />
+        </Section>
+      ) });
+    }
+  }
+  (edit ? allStoreSections : storeSections).forEach((x, i, arr) => {
+    pieces.push({ key: `own:${x.id}`, label: x.title, alert: x.style === "important", anchor: `own-${x.id}`, node: (
+<section key={x.id} id={`own-${x.id}`} className={`svc-section own-${x.style}${x.style === "important" ? " alert" : ""}`}>
+              <div className="svc-section-head"><h2>{x.title}</h2></div>
+              <div className="svc-section-body">
+                {edit && (
+                  <EditBar>
+                    <span className="svc-edit-tag">Only this store · {STYLES.find((st) => st.value === x.style)?.label}</span>
+                    <ActionButton label="Delete section" confirm={`Delete "${x.title}" from this store's page?`} action={deleteStoreSection.bind(null, id, x.id)} />
+                  </EditBar>
+                )}
+                <Blocks blocks={x.blocks} />
+                {edit && <details className="svc-edit-details"><summary>Edit this section</summary><StoreSectionForm action={saveStoreSection.bind(null, id, x.id)} initial={x} /></details>}
+              </div>
+            </section>
+    ) });
+  });
+  pieces.push({ key: "pricing", label: "Pricing", anchor: "pricing", node: (
+          <Section id="pricing" title="Pricing">
+            {edit && <EditBar><ModalForm button="+ Add a price" title="Add a price" submit="Add" action={saveItem.bind(null, id, "pricing", null)}>{priceFields()}</ModalForm></EditBar>}
+            <Grid kind="pricing" head={edit ? ["Service", "Price", "Comments", ""] : ["Service", "Price", "Comments"]} rows={(b.pricing ?? []).map((p: any) => [p.service, p.price === null || p.price === undefined ? "—" : `$${p.price}`, p.comments ?? "—", ...(edit ? [<span key="a" className="x-filters"><ModalForm button="Edit" title="Edit price" action={saveItem.bind(null, id, "pricing", p.id)}>{priceFields(p)}</ModalForm><ActionButton label="Delete" confirm={`Delete ${p.service}?`} action={deleteItem.bind(null, id, "pricing", p.id)} /></span>] : [])])} empty="No pricing yet." />
+          </Section>
+  ) });
+  pieces.push({ key: "contacts", label: "Directory", anchor: "contacts", node: (
+          <Section id="contacts" title="Directory">
+            {edit && <EditBar><ModalForm button="+ Add a contact" title="Add a contact" submit="Add" action={saveItem.bind(null, id, "contacts", null)}>{contactFields()}</ModalForm></EditBar>}
+            <Grid kind="directory" head={edit ? ["Name", "Title", "Phone", "Email", "Comments", ""] : ["Name", "Title", "Phone", "Email", "Comments"]} rows={(b.contacts ?? []).map((c: any) => [c.name ?? "—", c.title ?? "—", c.phone ?? "—", c.email ? <a key="e" href={`mailto:${c.email}`}>{c.email}</a> : "—", c.comments ?? "—", ...(edit ? [<span key="a" className="x-filters"><ModalForm button="Edit" title="Edit contact" action={saveItem.bind(null, id, "contacts", c.id)}>{contactFields(c)}</ModalForm><ActionButton label="Delete" confirm={`Delete ${c.name ?? "this contact"}?`} action={deleteItem.bind(null, id, "contacts", c.id)} /></span>] : [])])} empty="No contacts yet." />
+          </Section>
+  ) });
+  const order: string[] = Array.isArray(b.sectionOrder) ? b.sectionOrder : [];
+  const rank = (k: string) => { const i = order.indexOf(k); return i < 0 ? 1000 : i; };
+  const ordered = pieces.map((p, i) => ({ p, i })).sort((a, b2) => (rank(a.p.key) - rank(b2.p.key)) || a.i - b2.i).map((x) => x.p);
+  const orderKeys = ordered.map((p) => p.key);
   const nav: { id: string; label: string; alert?: boolean }[] = [
     ...(address ? [{ id: "map", label: "Map" }] : []),
-    ...(edit || notes.length || store?.special_note ? [{ id: "important", label: "Important", alert: true }] : []),
-    ...(logins.length ? [{ id: "logins", label: "Logins" }] : []),
-    { id: "hours", label: "Hours" },
-    ...(edit ? allSections.map(([t]) => ({ id: slug(t), label: t })) : groups.map(([t]) => ({ id: slug(t), label: t }))),
-    ...(edit ? ((b.storeSections ?? []) as any[]).map(normalizeSection) : storeSections).map((x) => ({ id: `own-${x.id}`, label: x.title, alert: x.style === "important" })),
-    { id: "pricing", label: "Pricing" },
-    { id: "contacts", label: "Directory" },
+    ...ordered.map((p) => ({ id: p.anchor, label: p.label, alert: p.alert })),
   ];
 
   return (
@@ -199,71 +286,16 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
           )}
           {empty && !edit && <section className="svc-section"><div className="svc-section-body"><p className="svc-empty">No Service Data has been entered for this store yet.{canEdit ? " Use Edit this page to add it." : ""}</p></div></section>}
           {edit && <div className="svc-editing-note" role="status">You&apos;re editing this store&apos;s page. Changes save as you make them and agents see them right away. <Link href={`/service/info?d=${id}`}>Done editing</Link></div>}
-          {edit && (
-            <Section id="important" title="Important" alert>
-              <EditBar><ModalForm button="+ Add a note" title="Add an important note" submit="Add" action={saveItem.bind(null, id, "limitations", null)}>{noteFields()}</ModalForm></EditBar>
-              {allNotes.length ? (
-                <ul className="svc-edit-list">{allNotes.map((n: any) => (
-                  <li key={`${n.list}-${n.id}`} data-off={n.active === false}>
-                    <span className="x-prewrap">{n.text}</span>
-                    <span className="x-filters">
-                      <ModalForm button="Edit" title="Edit note" action={saveItem.bind(null, id, n.list, n.id)}>{noteFields(n)}</ModalForm>
-                      <ActionButton label="Delete" confirm="Delete this note?" action={deleteItem.bind(null, id, n.list, n.id)} />
-                    </span>
-                  </li>
-                ))}</ul>
-              ) : <p className="svc-empty">No important notes yet.</p>}
-              {store?.special_note && <p className="svc-note">Special note (from store settings): {store.special_note}</p>}
-            </Section>
-          )}
-          {!edit && (notes.length > 0 || store?.special_note) && (
-            <Section id="important" title="Important" alert>
-              <ul>{notes.map((n: any) => <li key={n.id} className="x-prewrap">{n.text}</li>)}{store?.special_note && <li className="x-prewrap">{store.special_note}</li>}</ul>
-            </Section>
-          )}
-          {logins.length > 0 && <Section id="logins" title="Logins"><ServiceLogins credentials={logins} /></Section>}
-          <Section id="hours" title="Hours">
-            <HoursGrid rows={hours} timeZone={tz} />
-            <p className="svc-note">Times are the store&apos;s local time.{edit && user.role === "admin" && <> <Link className="text-accent" href={`/stores/${id}`}>Change hours</Link></>}</p>
-          </Section>
-          {!edit && groups.map(([title, keys]) => (
-            <Section key={title} id={slug(title)} title={title}>
-              <Facts items={keys.map((k) => [fieldLabel.get(k) ?? label(k), <Answer key={k} k={k} value={g[k]} />])} />
-            </Section>
-          ))}
-          {edit && [...editGroups, ...(other.length ? [{ title: "Other", keys: other, sid: null, hidden: false }] : [])].map((x) => (
-            <section key={x.title} id={slug(x.title)} className={`svc-section${x.hidden ? " svc-hidden" : ""}`}>
-              <div className="svc-section-head"><h2>{x.title}{x.hidden && <small className="svc-hidden-tag">Hidden on this store</small>}</h2></div>
-              <div className="svc-section-body">
-                <EditBar>
-                  {x.sid && <ActionButton label={x.hidden ? "Show on this store" : "Hide on this store"} action={setSectionHidden.bind(null, id, x.sid, !x.hidden)} />}
-                  {x.sid && <Link className="x-btn" href="/stores/sections" style={{ display: "inline-flex", alignItems: "center" }}>Rename or change questions (all stores)</Link>}
-                </EditBar>
-                {!x.hidden && (x.keys.length ? (
-                  <InlineForm action={saveGeneral.bind(null, id)} submit={`Save ${x.title}`}>
-                    <div className="svc-edit-grid">{x.keys.map((k) => box(k, fieldLabel.get(k) ?? label(k)))}</div>
-                  </InlineForm>
-                ) : <p className="svc-empty">This section has no questions yet.</p>)}
+          {ordered.map((p, i) => edit ? (
+            <div key={p.key} className="svc-movable">
+              <div className="svc-mover" aria-label={`Move ${p.label}`}>
+                <span>{p.label}</span>
+                {i > 0 && <ActionButton label="↑ Up" action={movePageSection.bind(null, id, orderKeys, p.key, -1)} />}
+                {i < ordered.length - 1 && <ActionButton label="↓ Down" action={movePageSection.bind(null, id, orderKeys, p.key, 1)} />}
               </div>
-            </section>
-          ))}
-          {(edit ? allStoreSections : storeSections).map((x, i, arr) => (
-            <section key={x.id} id={`own-${x.id}`} className={`svc-section own-${x.style}${x.style === "important" ? " alert" : ""}`}>
-              <div className="svc-section-head"><h2>{x.title}</h2></div>
-              <div className="svc-section-body">
-                {edit && (
-                  <EditBar>
-                    <span className="svc-edit-tag">Only this store · {STYLES.find((st) => st.value === x.style)?.label}</span>
-                    {i > 0 && <ActionButton label="↑ Move up" action={moveStoreSection.bind(null, id, x.id, -1)} />}
-                    {i < arr.length - 1 && <ActionButton label="↓ Move down" action={moveStoreSection.bind(null, id, x.id, 1)} />}
-                    <ActionButton label="Delete section" confirm={`Delete "${x.title}" from this store's page?`} action={deleteStoreSection.bind(null, id, x.id)} />
-                  </EditBar>
-                )}
-                <Blocks blocks={x.blocks} />
-                {edit && <details className="svc-edit-details"><summary>Edit this section</summary><StoreSectionForm action={saveStoreSection.bind(null, id, x.id)} initial={x} /></details>}
-              </div>
-            </section>
-          ))}
+              {p.node}
+            </div>
+          ) : <Fragment key={p.key}>{p.node}</Fragment>)}
           {edit && (
             <section className="svc-section svc-add-section">
               <div className="svc-section-head"><h2>+ Add a section</h2></div>
@@ -273,14 +305,6 @@ export default async function ServiceData({ searchParams }: { searchParams: Prom
               </div>
             </section>
           )}
-          <Section id="pricing" title="Pricing">
-            {edit && <EditBar><ModalForm button="+ Add a price" title="Add a price" submit="Add" action={saveItem.bind(null, id, "pricing", null)}>{priceFields()}</ModalForm></EditBar>}
-            <Grid kind="pricing" head={edit ? ["Service", "Price", "Comments", ""] : ["Service", "Price", "Comments"]} rows={(b.pricing ?? []).map((p: any) => [p.service, p.price === null || p.price === undefined ? "—" : `$${p.price}`, p.comments ?? "—", ...(edit ? [<span key="a" className="x-filters"><ModalForm button="Edit" title="Edit price" action={saveItem.bind(null, id, "pricing", p.id)}>{priceFields(p)}</ModalForm><ActionButton label="Delete" confirm={`Delete ${p.service}?`} action={deleteItem.bind(null, id, "pricing", p.id)} /></span>] : [])])} empty="No pricing yet." />
-          </Section>
-          <Section id="contacts" title="Directory">
-            {edit && <EditBar><ModalForm button="+ Add a contact" title="Add a contact" submit="Add" action={saveItem.bind(null, id, "contacts", null)}>{contactFields()}</ModalForm></EditBar>}
-            <Grid kind="directory" head={edit ? ["Name", "Title", "Phone", "Email", "Comments", ""] : ["Name", "Title", "Phone", "Email", "Comments"]} rows={(b.contacts ?? []).map((c: any) => [c.name ?? "—", c.title ?? "—", c.phone ?? "—", c.email ? <a key="e" href={`mailto:${c.email}`}>{c.email}</a> : "—", c.comments ?? "—", ...(edit ? [<span key="a" className="x-filters"><ModalForm button="Edit" title="Edit contact" action={saveItem.bind(null, id, "contacts", c.id)}>{contactFields(c)}</ModalForm><ActionButton label="Delete" confirm={`Delete ${c.name ?? "this contact"}?`} action={deleteItem.bind(null, id, "contacts", c.id)} /></span>] : [])])} empty="No contacts yet." />
-          </Section>
         </div>
       </div>
     </div>
