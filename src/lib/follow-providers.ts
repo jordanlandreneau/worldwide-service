@@ -163,7 +163,7 @@ export async function googleChatSend(space: string | null, text: string, senderE
   }
   if (!googleChatReady()) return { ok: false, error: "Google Chat isn't signed in. A manager needs to click Connect Google Chat in Follow-ups." };
   const token = await googleAccess().catch(() => null);
-  if (!token) return { ok: false, error: "Google didn't accept the Chat service account key." };
+  if (!token) return { ok: false, error: "Google Chat isn't connected yet. A manager needs to click Connect Google Chat (Follow-ups → Google Chat) and sign in with service@worldwidebdc.com." };
   const res = await fetch(`https://chat.googleapis.com/v1/${space}/messages`, {
     method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ text }),
   });
