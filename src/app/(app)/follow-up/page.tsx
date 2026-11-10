@@ -9,13 +9,13 @@ import { atLeast, requireUser } from "@/lib/access";
 import { db, fetchAll } from "@/lib/data";
 import { acknowledge, addMember, bulkAddMembers, deleteChat, markRead, removeMember, reopen, saveChat, sendFollowUp, sendReply, setMemberEmail, syncWhatsAppNames } from "@/lib/follow";
 import { CHANNELS, channelReady } from "@/lib/follow-send";
-import { teamsAccount, teamsConfigured } from "@/lib/follow-providers";
+import { googleAccount, googleUserConfigured, teamsAccount, teamsConfigured } from "@/lib/follow-providers";
 import { DesktopAlerts } from "@/components/follow-live";
 
 export const metadata = { title: "Follow-ups · Worldwide Service" };
 
 type Channel = keyof typeof CHANNELS;
-type Params = { show?: string; teams?: string; view?: string; channel?: string; chat?: string; tab?: string; q?: string; msg?: string; reply?: string; mention?: string };
+type Params = { show?: string; teams?: string; google?: string; added?: string; view?: string; channel?: string; chat?: string; tab?: string; q?: string; msg?: string; reply?: string; mention?: string };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ICON: Record<Channel, string> = { whatsapp: "💬", sms: "📱", slack: "🔔", email: "✉️", teams: "🟣", google_chat: "🗨️" };
 const DAY = 24 * 3600 * 1000;
@@ -41,8 +41,9 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   const client = db();
   // New replies are pulled in the background by <LiveSync />, so the page doesn't wait on the chat apps.
   // Everything the page needs is read at once.
-  const [teams, chats, stores, { data: unreadRows }, { data: memberRows }] = await Promise.all([
+  const [teams, google, chats, stores, { data: unreadRows }, { data: memberRows }] = await Promise.all([
     teamsConfigured() ? teamsAccount().catch(() => null) : Promise.resolve(null),
+    googleUserConfigured() ? googleAccount().catch(() => null) : Promise.resolve(null),
     fetchAll<any>("follow_chats", "id,name,channel,dealership_id,active,last_activity,whatsapp_group_id,teams_chat_id,google_chat_space,justcall_line,justcall_group_id,slack_channel_id", "name"),
     fetchAll<any>("dealerships", "id,name,active", "name"),
     // "Pending" means store messages nobody has answered or acknowledged yet.
@@ -82,7 +83,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
           {channels.map((ch) => (
             <Link key={ch} href={link({ channel: ch, view: view === "dashboard" ? undefined : view })} className={ch === channel ? "active" : ""} title={CHANNELS[ch]}>
               <span aria-hidden>{ICON[ch]}</span><span className="fu-ch-name">{CHANNELS[ch]}</span>
-              <i className={(ch === "teams" ? !!teams : channelReady(ch)) ? "on" : ""} aria-label={(ch === "teams" ? !!teams : channelReady(ch)) ? "connected" : "not connected"} />
+              <i className={(ch === "teams" ? !!teams : ch === "google_chat" ? !!google : channelReady(ch)) ? "on" : ""} aria-label={(ch === "teams" ? !!teams : ch === "google_chat" ? !!google : channelReady(ch)) ? "connected" : "not connected"} />
             </Link>
           ))}
         </div>
@@ -91,6 +92,12 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
             {!teamsConfigured() ? "Microsoft Teams: keys missing in Vercel" : teams ? <>Microsoft Teams: connected as {teams.name ?? teams.account}</> : "Microsoft Teams: not signed in"}
             {teamsConfigured() && manager && <a className="fu-conn-btn" href="/api/public/microsoft-auth-start">{teams ? "Reconnect Teams" : "Connect Teams"}</a>}
             {sp.teams && <span className="fu-conn-note">{{ connected: "Teams is connected.", failed: "Microsoft didn't accept the sign-in. Check the redirect URI and permissions.", expired: "The sign-in took too long. Try again.", cancelled: "Sign-in was cancelled.", denied: "Only managers can connect Teams.", missing: "Add the Microsoft keys in Vercel first." }[sp.teams] ?? ""}</span>}
+          </div>
+        ) : channel === "google_chat" ? (
+          <div className={`fu-conn ${google ? "on" : ""}`}>
+            {!googleUserConfigured() ? "Google Chat: add GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET in Vercel" : google ? <>Google Chat: connected as {google.name ?? google.account}</> : "Google Chat: not signed in"}
+            {googleUserConfigured() && manager && <a className="fu-conn-btn" href="/api/public/google-auth-start">{google ? "Reconnect & import spaces" : "Connect Google Chat"}</a>}
+            {sp.google && <span className="fu-conn-note">{{ connected: `Google Chat is connected.${sp.added ? ` Added ${sp.added} space${sp.added === "1" ? "" : "s"} as chats.` : ""}`, failed: "Google didn't accept the sign-in. Check the redirect URI and that the Chat API is on.", expired: "The sign-in took too long. Try again.", cancelled: "Sign-in was cancelled.", denied: "Only managers can connect Google Chat.", missing: "Add the Google OAuth keys in Vercel first." }[sp.google] ?? ""}</span>}
           </div>
         ) : (
           <div className={`fu-conn ${channelReady(channel) ? "on" : ""}`}>

@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "@/lib/data";
 import { saveInbound } from "@/lib/follow-inbound";
-import { type Pulled, teamsPull } from "@/lib/follow-providers";
+import { googlePull, googleSpaces, type Pulled, teamsPull } from "@/lib/follow-providers";
 import { smsPull } from "@/lib/follow-sms";
 
 // Saves only the messages this chat doesn't have yet (one lookup per chat), and returns how many were new.
@@ -62,7 +62,29 @@ export async function pullSms(force = false) {
   return smsPull(saveNew as any, since);
 }
 
+// Google Chat messages, read as the signed-in BDC Google account.
+export async function pullGoogle(force = false) {
+  const prev = await claim("google_sync", force ? 0 : 20_000);
+  if (prev === null) return 0;
+  const since = new Date(prev ? Math.min(Date.now() - 10 * 60_000, prev - 5 * 60_000) : Date.now() - 2 * 86400_000);
+  const { data: chats } = await db().from("follow_chats").select("id,google_chat_space").eq("channel", "google_chat").eq("active", true).not("google_chat_space", "is", null);
+  return googlePull((chats ?? []) as any[], since, saveNew);
+}
+
+// Adds a Follow-ups chat for every Google Chat space the signed-in account is in that isn't here yet.
+export async function importGoogleSpaces(by: string) {
+  const spaces = await googleSpaces();
+  if (!spaces.length) return 0;
+  const client = db();
+  const { data: have } = await client.from("follow_chats").select("google_chat_space").not("google_chat_space", "is", null);
+  const known = new Set(((have ?? []) as any[]).map((c) => c.google_chat_space));
+  const fresh = spaces.filter((sp) => !known.has(sp.name));
+  if (!fresh.length) return 0;
+  const { error } = await client.from("follow_chats").insert(fresh.map((sp) => ({ name: sp.displayName.slice(0, 200), channel: "google_chat", google_chat_space: sp.name, active: true, created_by: by })));
+  return error ? 0 : fresh.length;
+}
+
 export async function pullAll() {
-  const [teams, whatsapp, sms] = await Promise.all([pullTeams().catch(() => 0), pullWhatsApp().catch(() => 0), pullSms().catch(() => 0)]);
-  return teams + whatsapp + sms;
+  const [teams, whatsapp, sms, google] = await Promise.all([pullTeams().catch(() => 0), pullWhatsApp().catch(() => 0), pullSms().catch(() => 0), pullGoogle().catch(() => 0)]);
+  return teams + whatsapp + sms + google;
 }

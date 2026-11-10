@@ -1,6 +1,6 @@
 import "server-only";
 import { escapeHtml } from "@/lib/mail";
-import { googleChatReady, googleChatSend, teamsConfigured, teamsSend } from "@/lib/follow-providers";
+import { googleChatReady, googleChatSend, googleUserConfigured, teamsConfigured, teamsSend } from "@/lib/follow-providers";
 import { smsSend } from "@/lib/follow-sms";
 
 // Delivers a message to a dealership chat on its own channel.
@@ -21,7 +21,7 @@ export function channelReady(channel: Chat["channel"]) {
   if (channel === "whatsapp") return !!((process.env.PERISKOPE_API_KEY ?? process.env.PERISKOPE_API) && process.env.PERISKOPE_PHONE);
   if (channel === "sms") return !!process.env.JUSTCALL_API_KEY && !!process.env.JUSTCALL_API_SECRET;
   if (channel === "teams") return teamsConfigured();
-  if (channel === "google_chat") return googleChatReady();
+  if (channel === "google_chat") return googleUserConfigured() || googleChatReady();
   return false;
 }
 

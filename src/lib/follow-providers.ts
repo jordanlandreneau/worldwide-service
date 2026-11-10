@@ -144,8 +144,16 @@ async function googleAccess() {
 }
 
 export async function googleChatSend(space: string | null, text: string): Promise<Sent> {
-  if (!googleChatReady()) return { ok: false, error: "Google Chat isn't set up: GOOGLE_CHAT_SERVICE_ACCOUNT_JSON is missing." };
   if (!space || !/^spaces\/[\w-]+$/.test(space)) return { ok: false, error: "This chat has no Google Chat space. Add it in the chat's settings (spaces/…)." };
+  // Signed in as the BDC's Google account: send as that person, into any space they're in.
+  const user = await googleUserAccess().catch(() => null);
+  if (user) {
+    const r = await fetch(`https://chat.googleapis.com/v1/${space}/messages`, { method: "POST", headers: { Authorization: `Bearer ${user}`, "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+    if (!r.ok) return { ok: false, error: `Google Chat refused the message (${r.status}). Is the signed-in account a member of this space?` };
+    const b = (await r.json().catch(() => ({}))) as any;
+    return { ok: true, externalId: b.name };
+  }
+  if (!googleChatReady()) return { ok: false, error: "Google Chat isn't signed in. A manager needs to click Connect Google Chat in Follow-ups." };
   const token = await googleAccess().catch(() => null);
   if (!token) return { ok: false, error: "Google didn't accept the Chat service account key." };
   const res = await fetch(`https://chat.googleapis.com/v1/${space}/messages`, {
@@ -154,6 +162,85 @@ export async function googleChatSend(space: string | null, text: string): Promis
   if (!res.ok) return { ok: false, error: `Google Chat refused the message (${res.status}). The Chat app must be a member of the space.` };
   const body = (await res.json().catch(() => ({}))) as any;
   return { ok: true, externalId: body.name };
+}
+
+// ---------- Google Chat as the BDC's Google account (like Connect Teams) ----------
+// A manager signs in once; Follow-ups then lists the account's spaces, reads every message in them,
+// and sends as that account. Needs an OAuth client (GOOGLE_OAUTH_CLIENT_ID / _SECRET) in the same
+// Google Cloud project where the Chat API is turned on.
+type GTokens = { refresh: string; access?: string; expires?: number; account?: string; name?: string; user?: string };
+export const googleUserConfigured = () => !!(process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET);
+export const googleRedirect = () => `${SITE_URL}/api/public/google-auth-callback`;
+const G_SCOPES = "openid email profile https://www.googleapis.com/auth/chat.spaces.readonly https://www.googleapis.com/auth/chat.messages";
+
+export function googleSignInUrl(state: string) {
+  const q = new URLSearchParams({ client_id: process.env.GOOGLE_OAUTH_CLIENT_ID ?? "", response_type: "code", redirect_uri: googleRedirect(), scope: G_SCOPES, state, access_type: "offline", prompt: "consent select_account", hd: "worldwidebdc.com" });
+  return `https://accounts.google.com/o/oauth2/v2/auth?${q}`;
+}
+async function gUserToken(params: Record<string, string>) {
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: process.env.GOOGLE_OAUTH_CLIENT_ID ?? "", client_secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? "", ...params }),
+  });
+  const body = (await res.json().catch(() => ({}))) as any;
+  if (!res.ok || !body.access_token) throw new Error(body.error_description || body.error || `token ${res.status}`);
+  return body as { access_token: string; refresh_token?: string; expires_in: number; id_token?: string };
+}
+export async function googleFinishSignIn(code: string) {
+  const t = await gUserToken({ grant_type: "authorization_code", code, redirect_uri: googleRedirect() });
+  if (!t.refresh_token) throw new Error("no refresh token");
+  const me = (await (await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { Authorization: `Bearer ${t.access_token}` } })).json().catch(() => ({}))) as any;
+  await setState("google_chat_user", { refresh: seal(t.refresh_token), access: seal(t.access_token), expires: Date.now() + t.expires_in * 1000, account: me.email ?? null, name: me.name ?? null, user: me.sub ? `users/${me.sub}` : null, connected_at: new Date().toISOString() });
+}
+export async function googleAccount() {
+  const s = await getState<GTokens>("google_chat_user");
+  return s?.refresh ? { account: s.account ?? null, name: s.name ?? null } : null;
+}
+async function googleUserAccess(): Promise<string | null> {
+  const s = await getState<GTokens>("google_chat_user");
+  if (!s?.refresh || !googleUserConfigured()) return null;
+  if (s.access && s.expires && s.expires > Date.now() + 60_000) { try { return unseal(s.access); } catch { /* refresh below */ } }
+  const t = await gUserToken({ grant_type: "refresh_token", refresh_token: unseal(s.refresh) });
+  await setState("google_chat_user", { ...s, access: seal(t.access_token), expires: Date.now() + t.expires_in * 1000 });
+  return t.access_token;
+}
+
+// Every named space and group chat the signed-in account is in (not 1:1 DMs).
+export async function googleSpaces(): Promise<{ name: string; displayName: string }[]> {
+  const token = await googleUserAccess();
+  if (!token) return [];
+  const out: { name: string; displayName: string }[] = [];
+  let page = "";
+  for (let i = 0; i < 10; i++) {
+    const q = new URLSearchParams({ pageSize: "1000", ...(page ? { pageToken: page } : {}) });
+    const res = await fetch(`https://chat.googleapis.com/v1/spaces?${q}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) break;
+    const body = (await res.json().catch(() => ({}))) as any;
+    for (const sp of body.spaces ?? []) if (sp.spaceType !== "DIRECT_MESSAGE") out.push({ name: sp.name, displayName: sp.displayName || "Group chat" });
+    page = body.nextPageToken ?? "";
+    if (!page) break;
+  }
+  return out;
+}
+
+// New messages in each Google Chat chat, except the ones the BDC account sent.
+export async function googlePull(chats: { id: string; google_chat_space: string | null }[], since: Date, save: (chatId: string, list: Pulled[]) => Promise<number>) {
+  const token = await googleUserAccess().catch(() => null);
+  if (!token) return 0;
+  const me = (await getState<GTokens>("google_chat_user"))?.user ?? null;
+  const counts = await Promise.all(chats.filter((c) => c.google_chat_space && /^spaces\/[\w-]+$/.test(c.google_chat_space)).map(async (c) => {
+    try {
+      const q = new URLSearchParams({ pageSize: "100", orderBy: "createTime desc", filter: `createTime > "${since.toISOString()}"` });
+      const res = await fetch(`https://chat.googleapis.com/v1/${c.google_chat_space}/messages?${q}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return 0;
+      const list = (((await res.json().catch(() => ({}))) as any).messages ?? []) as any[];
+      const out: Pulled[] = list.reverse()
+        .filter((m) => m.sender?.type !== "BOT" && (!me || m.sender?.name !== me) && String(m.text ?? m.formattedText ?? "").trim())
+        .map((m) => ({ body: String(m.text ?? "").trim(), sender: m.sender?.name ?? null, senderName: m.sender?.displayName || null, externalId: m.name, at: m.createTime }));
+      return await save(c.id, out);
+    } catch { return 0; }
+  }));
+  return counts.reduce((a, b) => a + b, 0);
 }
 
 // ---------- Read-only connection checks (nothing is sent) ----------
@@ -198,14 +285,11 @@ export async function checkConnections(sample: { whatsapp?: string | null; teams
     return { ok: res.ok, detail: res.ok ? `Signed in as ${who}; can read the dealer chats` : `Signed in as ${who}, but reading a chat failed: ${await status(res)}` };
   });
   await run("Google Chat", async () => {
-    if (!googleChatReady()) return { ok: false, detail: "GOOGLE_CHAT_SERVICE_ACCOUNT_JSON is missing" };
-    let token: string;
-    try { token = await googleAccess(); } catch (e) { return { ok: false, detail: e instanceof Error ? e.message : "Google didn't accept the service account key" }; }
-    if (!sample.space) return { ok: true, detail: "Service account works" };
-    const res = await fetch(`https://chat.googleapis.com/v1/${sample.space}`, { headers: { Authorization: `Bearer ${token}` } });
-    const body = res.ok ? ((await res.json().catch(() => ({}))) as any) : null;
-    const replies = process.env.GOOGLE_CHAT_PROJECT_NUMBER ? "" : " (GOOGLE_CHAT_PROJECT_NUMBER missing, so replies can't be checked)";
-    return { ok: res.ok, detail: res.ok ? `Service account works; the app can see "${body?.displayName ?? sample.space}"${replies}` : `Google answered ${await status(res)}` };
+    if (!googleUserConfigured()) return { ok: false, detail: "GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET are missing (needed for Connect Google Chat)" };
+    const acct = await googleAccount();
+    if (!acct) return { ok: false, detail: "Keys are set. A manager needs to click Connect Google Chat in Follow-ups." };
+    const spaces = await googleSpaces();
+    return { ok: true, detail: `Signed in as ${acct.account}; can see ${spaces.length} spaces` };
   });
   out.push({ channel: "Replies (webhook key)", ok: !!process.env.FOLLOW_UP_WEBHOOK_KEY, detail: process.env.FOLLOW_UP_WEBHOOK_KEY ? "FOLLOW_UP_WEBHOOK_KEY is set" : "FOLLOW_UP_WEBHOOK_KEY is missing, so WhatsApp and text replies are refused" });
   return out;
