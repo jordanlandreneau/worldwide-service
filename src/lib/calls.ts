@@ -41,6 +41,8 @@ const stamp = (d: Date) => d.toISOString().slice(0, 19).replace("T", " ");
 export async function storeCalls(storeId: string, from: Date, to: Date, opts: { direction?: string; maxPages?: number } = {}): Promise<{ calls: Call[]; lines: string[]; error?: string; capped?: boolean }> {
   const lines = await storeLines(storeId);
   if (!lines.length) return { calls: [], lines };
+  // JustCall refuses an end time in the future.
+  to = new Date(Math.min(to.getTime(), Date.now() - 60_000));
   const out: Call[] = [];
   let capped = false;
   try {
