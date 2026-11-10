@@ -2,7 +2,19 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-type Msg = { id: string; chatId: string; chat: string; channel: string; from: string; body: string; href?: string };
+type Msg = { id: string; at?: string; chatId: string; chat: string; channel: string; from: string; body: string; href?: string };
+
+// Popups already shown or closed, remembered in this browser (all tabs), so none comes back.
+const SEEN = "fu_seen_popups";
+const seen = (): string[] => { try { return JSON.parse(localStorage.getItem(SEEN) ?? "[]"); } catch { return []; } };
+const remember = (ids: string[]) => { try { localStorage.setItem(SEEN, JSON.stringify([...new Set([...seen(), ...ids])].slice(-1000))); } catch { /* storage off */ } };
+const stamp = (at?: string) => {
+  if (!at) return "";
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return "";
+  const today = d.toDateString() === new Date().toDateString();
+  return d.toLocaleString("en-US", today ? { hour: "numeric", minute: "2-digit" } : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+};
 const link = (m: Msg) => m.href ?? `/follow-up?channel=${m.channel}&chat=${m.chatId}`;
 const NAMES: Record<string, string> = { event: "Command Center", whatsapp: "WhatsApp", teams: "Teams", email: "Email", google_chat: "Google Chat", sms: "Text", slack: "Slack" };
 
@@ -26,8 +38,10 @@ export function LiveSync() {
         const out = (await res.json()) as { added?: number; now?: string; messages?: Msg[] };
         if (stop) return;
         if (out.now) { since = out.now; try { sessionStorage.setItem("fu_since", out.now); } catch { /* storage off */ } }
-        const fresh = out.messages ?? [];
+        const before = new Set(seen());
+        const fresh = (out.messages ?? []).filter((m) => !before.has(m.id));
         if (fresh.length) {
+          remember(fresh.map((m) => m.id));
           setToasts((t) => [...t, ...fresh].slice(-4));
           for (const m of fresh) setTimeout(() => setToasts((t) => t.filter((x) => x.id !== m.id)), m.channel === "event" ? 60000 : 15000);
           if (document.visibilityState !== "visible" && "Notification" in window && Notification.permission === "granted") {
@@ -51,7 +65,7 @@ export function LiveSync() {
       {toasts.map((m) => (
         <a key={m.id} className="fu-toast" data-ch={m.channel} href={link(m)}
           onClick={(e) => { e.preventDefault(); setToasts((t) => t.filter((x) => x.id !== m.id)); router.push(link(m)); }}>
-          <span className="fu-toast-top"><strong>{m.chat}</strong>{NAMES[m.channel] ?? ""}
+          <span className="fu-toast-top"><strong>{m.chat}</strong>{NAMES[m.channel] ?? ""}{m.at && <time dateTime={m.at}>{stamp(m.at)}</time>}
             <button type="button" aria-label="Dismiss" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setToasts((t) => t.filter((x) => x.id !== m.id)); }}>✕</button></span>
           <p>{m.body}</p>
           <small>{m.from} · click to open</small>

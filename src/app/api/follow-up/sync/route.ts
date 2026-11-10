@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
   const since = body.since && !Number.isNaN(Date.parse(body.since)) ? body.since : null;
   if (!since) return NextResponse.json({ added, now, messages: [] });
   const client = db();
-  const { data } = await client.from("follow_messages").select("id,chat_id,body,sender_name,sender,received_at")
+  const { data } = await client.from("follow_messages").select("id,chat_id,body,sender_name,sender,received_at,created_at")
     .eq("direction", "inbound").gt("received_at", since).order("received_at").limit(10);
   const rows = (data ?? []) as any[];
   const ids = [...new Set(rows.map((r) => r.chat_id))];
@@ -33,8 +33,9 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     added: added || rows.length, now: until,
     messages: [
-      ...rows.map((r) => ({ id: r.id, chatId: r.chat_id, chat: chat.get(r.chat_id)?.name ?? "Chat", channel: chat.get(r.chat_id)?.channel ?? "", from: r.sender_name || r.sender || "Store", body: String(r.body).slice(0, 300) })),
-      ...events.map((e) => ({ id: e.id, chatId: "", chat: e.title, channel: "event", from: e.kind === "assigned" ? "Assigned to you" : e.kind === "onboarding" ? "Onboarding form" : "Calling sheet", body: String(e.body ?? "").slice(0, 300), href: e.link || "/command" })),
+      // Only messages sent in the last 2 hours pop up (history brought in from a chat app stays quiet).
+      ...rows.filter((r) => Date.parse(r.created_at) > Date.now() - 2 * 3600_000).map((r) => ({ id: r.id, at: r.created_at, chatId: r.chat_id, chat: chat.get(r.chat_id)?.name ?? "Chat", channel: chat.get(r.chat_id)?.channel ?? "", from: r.sender_name || r.sender || "Store", body: String(r.body).slice(0, 300) })),
+      ...events.map((e) => ({ id: e.id, at: e.created_at, chatId: "", chat: e.title, channel: "event", from: e.kind === "assigned" ? "Assigned to you" : e.kind === "onboarding" ? "Onboarding form" : "Calling sheet", body: String(e.body ?? "").slice(0, 300), href: e.link || "/command" })),
     ],
   });
 }
