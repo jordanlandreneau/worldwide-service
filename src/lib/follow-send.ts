@@ -25,7 +25,7 @@ export function channelReady(channel: Chat["channel"]) {
   return false;
 }
 
-export async function deliver(chat: Chat, members: Member[], text: string, subject: string): Promise<Sent> {
+export async function deliver(chat: Chat, members: Member[], text: string, subject: string, senderEmail?: string): Promise<Sent> {
   try {
     if (chat.channel === "email") return await email(members, text, subject);
     if (chat.channel === "whatsapp") return await whatsapp(chat, text);
@@ -35,7 +35,7 @@ export async function deliver(chat: Chat, members: Member[], text: string, subje
       return r.ok ? { ok: true, externalId: r.externalId } : r;
     }
     if (chat.channel === "teams") return await teamsSend(chat.teams_chat_id, text);
-    if (chat.channel === "google_chat") return await googleChatSend(chat.google_chat_space, text);
+    if (chat.channel === "google_chat") return await googleChatSend(chat.google_chat_space, text, senderEmail);
     return { ok: false, error: `${CHANNELS[chat.channel]} isn't connected to the Service site yet.` };
   } catch {
     return { ok: false, error: `${CHANNELS[chat.channel]} didn't answer. Try again.` };

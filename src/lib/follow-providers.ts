@@ -143,9 +143,17 @@ async function googleAccess() {
   return gToken.value;
 }
 
-export async function googleChatSend(space: string | null, text: string): Promise<Sent> {
+export async function googleChatSend(space: string | null, text: string, senderEmail?: string | null): Promise<Sent> {
   if (!space || !/^spaces\/[\w-]+$/.test(space)) return { ok: false, error: "This chat has no Google Chat space. Add it in the chat's settings (spaces/…)." };
-  // Signed in as the BDC's Google account: send as that person, into any space they're in.
+  // The agent's own Google account first, so the message shows their name in Google Chat.
+  // If they haven't connected theirs, or aren't in this space, it goes from the shared BDC account.
+  if (senderEmail) {
+    const own = await googleUserAccess(senderEmail).catch(() => null);
+    if (own) {
+      const r = await fetch(`https://chat.googleapis.com/v1/${space}/messages`, { method: "POST", headers: { Authorization: `Bearer ${own}`, "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+      if (r.ok) { const b = (await r.json().catch(() => ({}))) as any; return { ok: true, externalId: b.name }; }
+    }
+  }
   const user = await googleUserAccess().catch(() => null);
   if (user) {
     const r = await fetch(`https://chat.googleapis.com/v1/${space}/messages`, { method: "POST", headers: { Authorization: `Bearer ${user}`, "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
@@ -186,22 +194,24 @@ async function gUserToken(params: Record<string, string>) {
   if (!res.ok || !body.access_token) throw new Error(body.error_description || body.error || `token ${res.status}`);
   return body as { access_token: string; refresh_token?: string; expires_in: number; id_token?: string };
 }
-export async function googleFinishSignIn(code: string) {
+// The shared account (reads every space) is "google_chat_user"; each agent's own account is "google_chat_user:<their email>".
+const gKey = (owner?: string | null) => (owner ? `google_chat_user:${owner.toLowerCase()}` : "google_chat_user");
+export async function googleFinishSignIn(code: string, owner?: string | null) {
   const t = await gUserToken({ grant_type: "authorization_code", code, redirect_uri: googleRedirect() });
   if (!t.refresh_token) throw new Error("no refresh token");
   const me = (await (await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { Authorization: `Bearer ${t.access_token}` } })).json().catch(() => ({}))) as any;
-  await setState("google_chat_user", { refresh: seal(t.refresh_token), access: seal(t.access_token), expires: Date.now() + t.expires_in * 1000, account: me.email ?? null, name: me.name ?? null, user: me.sub ? `users/${me.sub}` : null, connected_at: new Date().toISOString() });
+  await setState(gKey(owner), { refresh: seal(t.refresh_token), access: seal(t.access_token), expires: Date.now() + t.expires_in * 1000, account: me.email ?? null, name: me.name ?? null, user: me.sub ? `users/${me.sub}` : null, connected_at: new Date().toISOString() });
 }
-export async function googleAccount() {
-  const s = await getState<GTokens>("google_chat_user");
+export async function googleAccount(owner?: string | null) {
+  const s = await getState<GTokens>(gKey(owner));
   return s?.refresh ? { account: s.account ?? null, name: s.name ?? null } : null;
 }
-async function googleUserAccess(): Promise<string | null> {
-  const s = await getState<GTokens>("google_chat_user");
+async function googleUserAccess(owner?: string | null): Promise<string | null> {
+  const s = await getState<GTokens>(gKey(owner));
   if (!s?.refresh || !googleUserConfigured()) return null;
   if (s.access && s.expires && s.expires > Date.now() + 60_000) { try { return unseal(s.access); } catch { /* refresh below */ } }
   const t = await gUserToken({ grant_type: "refresh_token", refresh_token: unseal(s.refresh) });
-  await setState("google_chat_user", { ...s, access: seal(t.access_token), expires: Date.now() + t.expires_in * 1000 });
+  await setState(gKey(owner), { ...s, access: seal(t.access_token), expires: Date.now() + t.expires_in * 1000 });
   return t.access_token;
 }
 
@@ -227,7 +237,9 @@ export async function googleSpaces(): Promise<{ name: string; displayName: strin
 export async function googlePull(chats: { id: string; google_chat_space: string | null }[], since: Date, save: (chatId: string, list: Pulled[]) => Promise<number>) {
   const token = await googleUserAccess().catch(() => null);
   if (!token) return 0;
-  const me = (await getState<GTokens>("google_chat_user"))?.user ?? null;
+  // Our own messages (the shared account or any agent who connected theirs) aren't store messages.
+  const { data: ours } = await db().from("follow_integrations").select("data").like("name", "google_chat_user%");
+  const mine = new Set(((ours ?? []) as any[]).map((r) => r.data?.user).filter(Boolean));
   const counts = await Promise.all(chats.filter((c) => c.google_chat_space && /^spaces\/[\w-]+$/.test(c.google_chat_space)).map(async (c) => {
     try {
       const q = new URLSearchParams({ pageSize: "100", orderBy: "createTime desc", filter: `createTime > "${since.toISOString()}"` });
@@ -235,7 +247,7 @@ export async function googlePull(chats: { id: string; google_chat_space: string 
       if (!res.ok) return 0;
       const list = (((await res.json().catch(() => ({}))) as any).messages ?? []) as any[];
       const out: Pulled[] = list.reverse()
-        .filter((m) => m.sender?.type !== "BOT" && (!me || m.sender?.name !== me) && String(m.text ?? m.formattedText ?? "").trim())
+        .filter((m) => m.sender?.type !== "BOT" && !mine.has(m.sender?.name) && String(m.text ?? m.formattedText ?? "").trim())
         .map((m) => ({ body: String(m.text ?? "").trim(), sender: m.sender?.name ?? null, senderName: m.sender?.displayName || null, externalId: m.name, at: m.createTime }));
       return await save(c.id, out);
     } catch { return 0; }

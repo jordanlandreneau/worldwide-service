@@ -41,9 +41,10 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   const client = db();
   // New replies are pulled in the background by <LiveSync />, so the page doesn't wait on the chat apps.
   // Everything the page needs is read at once.
-  const [teams, google, chats, stores, { data: unreadRows }, { data: memberRows }] = await Promise.all([
+  const [teams, google, myGoogle, chats, stores, { data: unreadRows }, { data: memberRows }] = await Promise.all([
     teamsConfigured() ? teamsAccount().catch(() => null) : Promise.resolve(null),
     googleUserConfigured() ? googleAccount().catch(() => null) : Promise.resolve(null),
+    googleUserConfigured() ? googleAccount(user.email).catch(() => null) : Promise.resolve(null),
     fetchAll<any>("follow_chats", "id,name,channel,dealership_id,active,last_activity,whatsapp_group_id,teams_chat_id,google_chat_space,justcall_line,justcall_group_id,slack_channel_id", "name"),
     fetchAll<any>("dealerships", "id,name,active", "name"),
     // "Pending" means store messages nobody has answered or acknowledged yet.
@@ -97,7 +98,10 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
           <div className={`fu-conn ${google ? "on" : ""}`}>
             {!googleUserConfigured() ? "Google Chat: add GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET in Vercel" : google ? <>Google Chat: connected as {google.name ?? google.account}</> : "Google Chat: not signed in"}
             {googleUserConfigured() && manager && <a className="fu-conn-btn" href="/api/public/google-auth-start">{google ? "Reconnect & import spaces" : "Connect Google Chat"}</a>}
-            {sp.google && <span className="fu-conn-note">{{ connected: `Google Chat is connected.${sp.added ? ` Added ${sp.added} space${sp.added === "1" ? "" : "s"} as chats.` : ""}`, failed: "Google didn't accept the sign-in. Check the redirect URI and that the Chat API is on.", expired: "The sign-in took too long. Try again.", cancelled: "Sign-in was cancelled.", denied: "Only managers can connect Google Chat.", missing: "Add the Google OAuth keys in Vercel first." }[sp.google] ?? ""}</span>}
+            {googleUserConfigured() && google && (myGoogle
+              ? <span className="fu-conn-note">Your replies go out as {myGoogle.account}. <a href="/api/public/google-auth-start?mine=1">Switch account</a></span>
+              : <a className="fu-conn-btn" href="/api/public/google-auth-start?mine=1">Send as me ({user.email})</a>)}
+            {sp.google && <span className="fu-conn-note">{{ mine: "Your Google account is connected. Your Google Chat replies now show your name.", connected: `Google Chat is connected.${sp.added ? ` Added ${sp.added} space${sp.added === "1" ? "" : "s"} as chats.` : ""}`, failed: "Google didn't accept the sign-in. Check the redirect URI and that the Chat API is on.", expired: "The sign-in took too long. Try again.", cancelled: "Sign-in was cancelled.", denied: "Only managers can connect Google Chat.", missing: "Add the Google OAuth keys in Vercel first." }[sp.google] ?? ""}</span>}
           </div>
         ) : (
           <div className={`fu-conn ${channelReady(channel) ? "on" : ""}`}>

@@ -28,7 +28,7 @@ async function send(chatId: string, body: string, subject: string, extra: Record
   const found = await loadChat(chatId);
   if (!found) return { error: "This chat no longer exists." };
   if (!found.chat.active) return { error: "This chat is turned off. A manager can turn it back on." };
-  const result = await deliver(found.chat, found.members, body, subject);
+  const result = await deliver(found.chat, found.members, body, subject, by.email);
   const client = db();
   await client.from("follow_messages").insert({
     chat_id: chatId, direction: "outbound", body, sender_name: by.name, sender: by.email, ...extra,
