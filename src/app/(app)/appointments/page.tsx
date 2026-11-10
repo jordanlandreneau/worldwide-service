@@ -7,27 +7,25 @@ import { atLeast } from "@/lib/access";
 import { deleteAppointment, saveAppointment, setAppointmentStatus } from "@/lib/appointments";
 import { db, fetchAll } from "@/lib/data";
 import { localParts, requireScoped, showLocal } from "@/lib/scope";
+import { findAppointments } from "@/lib/appointment-list";
 
 export const metadata = { title: "Appointments · Worldwide Service" };
 const STATUS: [string, string][] = [["set", "Set"], ["showed", "Showed"], ["no_show", "No show"], ["cancelled", "Cancelled"], ["rescheduled", "Rescheduled"]];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-export default async function Appointments({ searchParams }: { searchParams: Promise<{ d?: string; from?: string; to?: string; status?: string; added?: string; campaign?: string }> }) {
+export default async function Appointments({ searchParams }: { searchParams: Promise<{ d?: string; from?: string; to?: string; status?: string; added?: string; campaign?: string; agent?: string; dates?: string }> }) {
   const { user, stores: scope } = await requireScoped();
   const staff = user.role !== "dealership";
-  const { d = "", from = "", to = "", status = "", added, campaign = "" } = await searchParams;
+  const { d = "", from = "", to = "", status = "", added, campaign = "", agent = "", dates = "appt" } = await searchParams;
   const stores = (await fetchAll<any>("dealerships", "id,name,active,timezone", "name")).filter((s) => s.active !== false && (scope === null || scope.includes(s.id)));
   const store = stores.find((s) => s.id === d) ?? (stores.length === 1 ? stores[0] : undefined);
   const names = new Map(stores.map((s) => [s.id as string, s]));
   const client = db();
 
-  let query = client.from("appointments").select("id,dealership_id,customer_name,phone,appt_at,campaign_id,notes,status,created_by,created_at").order("appt_at", { ascending: false }).limit(500);
-  if (store) query = query.eq("dealership_id", store.id);
-  else if (scope !== null) query = query.in("dealership_id", scope.length ? scope : ["00000000-0000-0000-0000-000000000000"]);
-  if (DATE.test(from)) query = query.gte("appt_at", `${from}T00:00:00-05:00`);
-  if (DATE.test(to)) query = query.lte("appt_at", `${to}T23:59:59-05:00`);
-  if (STATUS.some(([k]) => k === status)) query = query.eq("status", status);
-  const [{ data: appts }, { data: camps }] = await Promise.all([
+  const people = staff ? (await fetchAll<any>("app_users", "email,first_name,last_name,role", "first_name")).filter((u) => u.role !== "dealership") : [];
+  const personName = new Map(people.map((u) => [String(u.email).toLowerCase(), `${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() || u.email]));
+  const query = findAppointments({ store: store?.id, scope, agent: staff ? agent || undefined : undefined, status, from, to, dates: dates === "set" ? "set" : "appt" });
+  const [appts, { data: camps }] = await Promise.all([
     query,
     store ? client.from("campaigns").select("id,category,name").eq("dealership_id", store.id).order("category").order("sort_order") : Promise.resolve({ data: [] as any[] }),
   ]);
@@ -62,22 +60,26 @@ export default async function Appointments({ searchParams }: { searchParams: Pro
           ) : <p className="text-sm text-ink-muted">Pick a store with the store search at the top right, then the form appears here.</p>}
         </Card></div>
       )}
-      <Card title="Appointments" note={`${(appts ?? []).length} shown${(appts ?? []).length === 500 ? " (latest 500)" : ""}`}>
+      <Card title="Appointments" note={`${appts.length} shown${appts.length === 500 ? " (latest 500; narrow the filters or download the CSV for all)" : ""}`}>
         <form className="x-filters" style={{ marginBottom: 14 }}>
-          {store && <input type="hidden" name="d" value={store.id} />}
+          {stores.length > 1 && <select className="x-input" name="d" defaultValue={store?.id ?? ""} aria-label="Dealership"><option value="">All dealerships</option>{stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>}
+          {staff && <select className="x-input" name="agent" defaultValue={agent} aria-label="Agent"><option value="">All agents</option>{people.map((u) => <option key={u.email} value={u.email}>{personName.get(String(u.email).toLowerCase())}</option>)}</select>}
+          <select className="x-input" name="dates" defaultValue={dates} aria-label="Dates apply to"><option value="appt">Appointment date</option><option value="set">Date it was set</option></select>
           <label className="text-sm">From <input className="x-input" type="date" name="from" defaultValue={from} /></label>
           <label className="text-sm">To <input className="x-input" type="date" name="to" defaultValue={to} /></label>
           <select className="x-input" name="status" defaultValue={status} aria-label="Status"><option value="">All statuses</option>{STATUS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
           <button className="x-btn x-btn-primary">Apply</button>
-          {(from || to || status) && <Link className="x-btn" href={store ? `/appointments?d=${store.id}` : "/appointments"} style={{ display: "inline-flex", alignItems: "center" }}>Clear</Link>}
+          {(from || to || status || agent || d) && <Link className="x-btn" href="/appointments" style={{ display: "inline-flex", alignItems: "center" }}>Clear</Link>}
+          <a className="x-btn" href={`/appointments/export?${new URLSearchParams({ ...(store ? { d: store.id } : {}), ...(agent ? { agent } : {}), ...(from ? { from } : {}), ...(to ? { to } : {}), ...(status ? { status } : {}), dates })}`} style={{ display: "inline-flex", alignItems: "center", marginLeft: "auto" }}>Download CSV</a>
         </form>
         <Table
-          head={["When", ...(store ? [] : ["Store"]), "Customer", "Phone", "Campaign", "Status", "Notes", ...(staff ? ["Set by", ""] : [])]}
+          head={["Appointment", "Set on", ...(store ? [] : ["Store"]), "Customer", "Phone", "Campaign", "Status", "Notes", ...(staff ? ["Set by", ""] : [])]}
           empty="No appointments yet."
-          rows={((appts ?? []) as any[]).map((a) => {
+          rows={appts.map((a) => {
             const s = names.get(a.dealership_id);
             return [
-              showLocal(a.appt_at, (s?.timezone as string | undefined) ?? "America/New_York"),
+              <strong key="w">{showLocal(a.appt_at, (s?.timezone as string | undefined) ?? "America/New_York")}</strong>,
+              <small key="c" className="text-ink-muted">{showLocal(a.created_at, (s?.timezone as string | undefined) ?? "America/New_York")}</small>,
               ...(store ? [] : [s?.name ?? "—"]),
               a.customer_name, a.phone, a.campaign_id ? campName.get(a.campaign_id) ?? "—" : "—",
               atLeast(user.role, "manager") ? (
@@ -87,7 +89,7 @@ export default async function Appointments({ searchParams }: { searchParams: Pro
                 </form>
               ) : STATUS.find(([k]) => k === a.status)?.[1] ?? a.status,
               <span key="n" className="x-prewrap">{a.notes ?? "—"}</span>,
-              ...(staff ? [a.created_by, atLeast(user.role, "manager") ? <ActionButton key="d" label="Delete" confirm={`Delete ${a.customer_name}'s appointment?`} action={deleteAppointment.bind(null, a.id)} /> : ""] : []),
+              ...(staff ? [personName.get(String(a.created_by).toLowerCase()) ?? a.created_by, atLeast(user.role, "manager") ? <ActionButton key="d" label="Delete" confirm={`Delete ${a.customer_name}'s appointment?`} action={deleteAppointment.bind(null, a.id)} /> : ""] : []),
             ];
           })}
         />

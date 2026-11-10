@@ -1160,3 +1160,9 @@ span.cc-wave { cursor: default; }
 .cc-rec { display: flex; align-items: center; gap: 8px; }
 .cc-rec audio { height: 32px; width: 230px; }
 .cc-rec a { font-size: 12.5px; }
+.mw-days { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(14px, 1fr); gap: 3px; align-items: end; height: 110px; margin-top: 14px; padding-top: 14px; }
+.mw-days > div { position: relative; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+.mw-days i { display: block; width: 100%; min-height: 2px; background: #1f5fbf; border-radius: 2px 2px 0 0; }
+.mw-days .today i { background: repeating-linear-gradient(45deg, #1f5fbf 0 4px, #6f9be0 4px 8px); }
+.mw-days span { position: absolute; top: -14px; font-size: 10px; color: #475467; }
+.mw-days small { font-size: 9.5px; color: #98a2b3; margin-top: 3px; }

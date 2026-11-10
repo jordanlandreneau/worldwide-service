@@ -30,17 +30,19 @@ export const monthWindows = () => {
   return { today, first, lastFirst: `${end.slice(0, 7)}-01`, lastEnd: end };
 };
 
-export type Lookups = { stores: Map<string, any>; storeList: any[]; teams: string[]; people: Map<string, string>; campaigns: Map<string, string> };
+export type Lookups = { stores: Map<string, any>; storeList: any[]; teams: string[]; people: Map<string, string>; userTeam: Map<string, string>; campaigns: Map<string, string> };
 export async function lookups(): Promise<Lookups> {
   const [storeList, teams, users, campaigns] = await Promise.all([
     fetchAll<any>("dealerships", "id,name,team_name,timezone,active", "name"),
     fetchAll<any>("teams", "name", "name"),
-    fetchAll<any>("app_users", "email,first_name,last_name", "email"),
+    fetchAll<any>("app_users", "email,first_name,last_name,team_name", "email"),
     fetchAll<any>("campaigns", "id,name,category", "id"),
   ]);
   return {
     storeList, stores: new Map(storeList.map((s) => [s.id, s])), teams: teams.map((t) => t.name as string).filter((n) => /^service (group|leadership)\b/i.test(n)),
     people: new Map(users.map((u) => [String(u.email).toLowerCase(), `${u.first_name} ${u.last_name}`.trim() || u.email])),
+    // Teams are the agents' Service teams (who set the appointment), not the store's old team label.
+    userTeam: new Map(users.filter((u) => u.team_name).map((u) => [String(u.email).toLowerCase(), u.team_name as string])),
     campaigns: new Map(campaigns.map((c) => [c.id, c.name])),
   };
 }
@@ -65,7 +67,7 @@ export async function production(from: string, to: string, f: Filters, look: Loo
   }
   return rows.filter((r) => {
     const s = look.stores.get(r.dealership_id);
-    if (f.teams.length && !f.teams.includes(s?.team_name ?? "")) return false;
+    if (f.teams.length && !f.teams.includes(look.userTeam.get(String(r.created_by).toLowerCase()) ?? "")) return false;
     const day = localParts(r.created_at, s?.timezone ?? NY).date;
     return day >= from && day <= to;
   });
@@ -74,7 +76,7 @@ export async function production(from: string, to: string, f: Filters, look: Loo
 export function dimension(row: any, key: string, look: Lookups): string {
   const store = look.stores.get(row.dealership_id);
   switch (key) {
-    case "team": return store?.team_name ?? "No team";
+    case "team": return look.userTeam.get(String(row.created_by).toLowerCase()) ?? "No team";
     case "creator": return look.people.get(String(row.created_by).toLowerCase()) ?? row.created_by ?? "Unknown";
     case "campaign": return row.campaign_id ? look.campaigns.get(row.campaign_id) ?? "Deleted campaign" : "No campaign";
     case "status": return STATUS.find(([k]) => k === row.status)?.[1] ?? row.status;
