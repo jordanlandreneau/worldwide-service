@@ -143,6 +143,17 @@ export async function deleteCampaign(storeId: string, id: string) {
   refresh();
 }
 
+// Calls made, calls that connected, appointments set: whole numbers that make sense together.
+function readStat(f: FormData): { calls: number; connected: number; appts: number } | string {
+  const calls = Number(f.get("calls_made") ?? 0);
+  const connected = Number(f.get("calls_connected") ?? 0);
+  const appts = Number(f.get("appointments_set") ?? 0);
+  if (![calls, connected, appts].every((n) => Number.isInteger(n) && n >= 0 && n <= 100000)) return "Calls, connected calls and appointments must be whole numbers.";
+  if (connected > calls) return "Connected calls can't be more than calls made.";
+  if (appts > calls && calls > 0) return "Appointments set can't be more than calls made.";
+  return { calls, connected, appts };
+}
+
 export async function addStat(storeId: string, _: Result, f: FormData): Promise<Result> {
   const user = await staff(storeId);
   if (!user) return { error: "You don't have access to this." };
@@ -150,15 +161,32 @@ export async function addStat(storeId: string, _: Result, f: FormData): Promise<
   if (!campaignId || !(await campaignInStore(storeId, campaignId))) return { error: "Choose a campaign." };
   const date = text(f, "stat_date", 10);
   if (!date || !DATE.test(date)) return { error: "Choose a date." };
-  const calls = Number(f.get("calls_made") ?? 0);
-  const appts = Number(f.get("appointments_set") ?? 0);
-  if (![calls, appts].every((n) => Number.isInteger(n) && n >= 0 && n <= 100000)) return { error: "Calls and appointments must be whole numbers." };
-  if (appts > calls && calls > 0) return { error: "Appointments set can't be more than calls made." };
+  const n = readStat(f);
+  if (typeof n === "string") return { error: n };
   const { error } = await db().from("campaign_stats").insert({
-    campaign_id: campaignId, dealership_id: storeId, stat_date: date, calls_made: calls, appointments_set: appts,
+    campaign_id: campaignId, dealership_id: storeId, stat_date: date, calls_made: n.calls, calls_connected: n.connected, appointments_set: n.appts,
     notes: text(f, "notes", 1000), entered_by: user.email,
   });
   if (error) return { error: "Couldn't save this entry." };
+  refresh();
+  return { ok: true };
+}
+
+// Managers and admins fix an entry: campaign, date, calls, connected, appointments, notes.
+export async function updateStat(storeId: string, id: string, _: Result, f: FormData): Promise<Result> {
+  const user = await staff(storeId);
+  if (!user || !UUID.test(id)) return { error: "You don't have access to this." };
+  const campaignId = text(f, "campaign_id", 64);
+  if (!campaignId || !(await campaignInStore(storeId, campaignId))) return { error: "Choose a campaign." };
+  const date = text(f, "stat_date", 10);
+  if (!date || !DATE.test(date)) return { error: "Choose a date." };
+  const n = readStat(f);
+  if (typeof n === "string") return { error: n };
+  const { error } = await db().from("campaign_stats").update({
+    campaign_id: campaignId, stat_date: date, calls_made: n.calls, calls_connected: n.connected, appointments_set: n.appts, notes: text(f, "notes", 1000),
+  }).eq("id", id).eq("dealership_id", storeId);
+  if (error) return { error: "Couldn't save this entry." };
+  await db().from("edit_log").insert({ user_email: user.email, table_name: "campaign_stats", row_id: id, action: "edit analytics entry" });
   refresh();
   return { ok: true };
 }

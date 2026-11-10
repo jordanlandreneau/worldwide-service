@@ -1,15 +1,16 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { AlarmClock, BarChart3, CalendarDays, Check, CheckCheck, ClipboardList, Clock, FileSpreadsheet, KeyRound, Layers, PhoneCall, Plus, ShieldCheck, Upload, UserRound, Users } from "lucide-react";
+import { AlarmClock, BarChart3, CalendarDays, Check, CheckCheck, ClipboardList, Clock, FileSpreadsheet, KeyRound, Layers, PhoneCall, Plus, ShieldCheck, Upload, UserRound, Users, Headphones, PhoneIncoming, PhoneOutgoing, Signal } from "lucide-react";
 import { ActionButton, Field, InlineForm, ModalForm } from "@/components/action-form";
 import { StorePicker } from "@/components/store-picker";
 import { Card, Table } from "@/components/ui";
-import { addStat, deleteCampaign, deleteList, deleteStat, saveCampaign, setListTask, toggleWave, uploadList } from "@/lib/command";
+import { addStat, updateStat, deleteCampaign, deleteList, deleteStat, saveCampaign, setListTask, toggleWave, uploadList } from "@/lib/command";
 import { assignmentsFor, serviceAgents, type Agent } from "@/lib/assignments";
 import { progressFor } from "@/lib/list-work";
 import { db, fetchAll } from "@/lib/data";
 import { atLeast } from "@/lib/access";
-import { localParts, requireScoped, showLocal } from "@/lib/scope";
+import { localParts, localToUtc, requireScoped, showLocal } from "@/lib/scope";
+import { storeCalls } from "@/lib/calls";
 
 export const metadata = { title: "Command Center · Worldwide Service" };
 
@@ -17,21 +18,21 @@ type Campaign = {
   id: string; category: string; name: string; description: string | null; cadence: string | null; list_ref: string | null;
   launch_date: string | null; wave1_done: boolean; wave2_done: boolean; script: string | null; info: string | null; sort_order: number; due_at: string | null; assigned_to: string | null;
 };
-type Stat = { id: string; campaign_id: string; stat_date: string; calls_made: number; appointments_set: number; notes: string | null; entered_by: string };
+type Stat = { id: string; campaign_id: string; stat_date: string; calls_made: number; calls_connected: number; appointments_set: number; notes: string | null; entered_by: string };
 type List = { id: string; campaign_id: string | null; file_name: string; row_count: number; note: string | null; uploaded_by: string; uploaded_at: string; due_at: string | null; assigned_to: string | null };
 
-const TABS = [["matrix", "Category Matrix", Layers], ["analytics", "Progress Analytics", BarChart3], ["breakdown", "Analytics Breakdown", ClipboardList], ["lists", "Outbound Lists", FileSpreadsheet]] as const;
+const TABS = [["matrix", "Category Matrix", Layers], ["analytics", "Progress Analytics", BarChart3], ["breakdown", "Analytics Breakdown", ClipboardList], ["lists", "Outbound Lists", FileSpreadsheet], ["calls", "Call Recordings", Headphones]] as const;
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 const daily = (c: Campaign) => /daily/i.test(c.cadence ?? "");
 const when = (v: string) => new Date(v).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
 const day = (v: string) => new Date(`${v}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 
-function StatCard({ label, icon, value, of, note, tone, bar }: { label: string; icon: ReactNode; value: number; of?: number; note: string; tone: string; bar: number }) {
+function StatCard({ label, icon, value, of, unit, note, tone, bar }: { label: string; icon: ReactNode; value: number; of?: number; unit?: string; note: string; tone: string; bar: number }) {
   return (
     <div className="cc-stat" data-tone={tone}>
       <div className="cc-stat-head"><span>{label}</span>{icon}</div>
-      <div className="cc-stat-value"><strong>{value}</strong>{of !== undefined && <small>/ {of}</small>}</div>
+      <div className="cc-stat-value"><strong>{value.toLocaleString()}{unit}</strong>{of !== undefined && <small>/ {of}</small>}</div>
       <p>{note}</p>
       <div className="cc-bar"><i style={{ width: `${Math.min(100, Math.max(0, bar))}%` }} /></div>
     </div>
@@ -99,9 +100,9 @@ function CampaignFields({ c, category, categories, ctx }: { c?: Campaign; catego
   );
 }
 
-export default async function CommandCenter({ searchParams }: { searchParams: Promise<{ d?: string; tab?: string; q?: string; cat?: string; status?: string; from?: string; to?: string; campaign?: string }> }) {
+export default async function CommandCenter({ searchParams }: { searchParams: Promise<{ d?: string; tab?: string; q?: string; cat?: string; status?: string; from?: string; to?: string; campaign?: string; dir?: string; agent?: string; result?: string; page?: string }> }) {
   const { user, stores: scope } = await requireScoped();
-  const { d, tab: rawTab = "matrix", q = "", cat = "", status = "", from = "", to = "", campaign: pick = "" } = await searchParams;
+  const { d, tab: rawTab = "matrix", q = "", cat = "", status = "", from = "", to = "", campaign: pick = "", dir = "", agent: agentPick = "", result = "", page: pageParam = "1" } = await searchParams;
   const tab = TABS.some(([k]) => k === rawTab) ? rawTab : "matrix";
   const stores = (await fetchAll<any>("dealerships", "id,name,active,timezone", "name")).filter((s: any) => s.active !== false && (scope === null || scope.includes(s.id))) as { id: string; name: string; timezone: string | null }[];
   const store = stores.find((s) => s.id === d) ?? stores[0];
@@ -118,7 +119,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
   const client = db();
   const [{ data: c1 }, { data: s1 }, { data: l1 }, agents, assigned] = await Promise.all([
     client.from("campaigns").select("id,category,name,description,cadence,list_ref,launch_date,wave1_done,wave2_done,script,info,sort_order,due_at,assigned_to").eq("dealership_id", store.id).order("category").order("sort_order").order("created_at"),
-    client.from("campaign_stats").select("id,campaign_id,stat_date,calls_made,appointments_set,notes,entered_by").eq("dealership_id", store.id).order("stat_date", { ascending: false }).order("created_at", { ascending: false }).limit(2000),
+    client.from("campaign_stats").select("id,campaign_id,stat_date,calls_made,calls_connected,appointments_set,notes,entered_by").eq("dealership_id", store.id).order("stat_date", { ascending: false }).order("created_at", { ascending: false }).limit(2000),
     client.from("outbound_lists").select("id,campaign_id,file_name,row_count,note,uploaded_by,uploaded_at,due_at,assigned_to").eq("dealership_id", store.id).order("uploaded_at", { ascending: false }).limit(200),
     worldwide ? serviceAgents() : Promise.resolve([] as Agent[]),
     worldwide ? assignmentsFor(store.id) : Promise.resolve([]),
@@ -264,10 +265,10 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
     const { data: a1 } = await client.from("appointments").select("campaign_id,created_at").eq("dealership_id", store.id).neq("status", "cancelled").limit(20000);
     const setOn = ((a1 ?? []) as { campaign_id: string | null; created_at: string }[]).map((a) => ({ campaign_id: a.campaign_id, day: new Date(a.created_at).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) }));
     const setInRange = setOn.filter((a) => (!from || a.day >= from) && (!to || a.day <= to));
-    type Tally = { calls: number; entered: number; site: number; last: string | null };
+    type Tally = { calls: number; connected: number; entered: number; site: number; last: string | null };
     const per = new Map<string, Tally>();
-    const tally = (id: string) => { let t = per.get(id); if (!t) { t = { calls: 0, entered: 0, site: 0, last: null }; per.set(id, t); } return t; };
-    for (const s of inRange) { const t = tally(s.campaign_id); t.calls += s.calls_made; t.entered += s.appointments_set; if (!t.last || s.stat_date > t.last) t.last = s.stat_date; }
+    const tally = (id: string) => { let t = per.get(id); if (!t) { t = { calls: 0, connected: 0, entered: 0, site: 0, last: null }; per.set(id, t); } return t; };
+    for (const s of inRange) { const t = tally(s.campaign_id); t.calls += s.calls_made; t.connected += s.calls_connected ?? 0; t.entered += s.appointments_set; if (!t.last || s.stat_date > t.last) t.last = s.stat_date; }
     for (const a of setInRange) { if (!a.campaign_id) continue; const t = tally(a.campaign_id); t.site += 1; if (!t.last || a.day > t.last) t.last = a.day; }
     const listTotals = new Map<string, { files: number; rows: number; worked: number }>();
     for (const l of lists) { if (!l.campaign_id) continue; const t = listTotals.get(l.campaign_id) ?? { files: 0, rows: 0, worked: 0 }; t.files += 1; t.rows += l.row_count; t.worked += listDone.get(l.id) ?? 0; listTotals.set(l.campaign_id, t); }
@@ -276,20 +277,21 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
     const scopedStats = chosen ? inRange.filter((s) => s.campaign_id === chosen.id) : inRange;
     const scopedSet = chosen ? setInRange.filter((a) => a.campaign_id === chosen.id) : setInRange;
     const calls = scopedStats.reduce((a, s) => a + s.calls_made, 0);
+    const connected = scopedStats.reduce((a, s) => a + (s.calls_connected ?? 0), 0);
     const appts = scopedStats.reduce((a, s) => a + s.appointments_set, 0) + scopedSet.length;
     const week = new Date(Date.now() - 6 * 86400000).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
     const recent = (chosen ? stats.filter((s) => s.campaign_id === chosen.id) : stats).filter((s) => s.stat_date >= week);
     const recentAppts = recent.reduce((a, s) => a + s.appointments_set, 0) + (chosen ? setOn.filter((a) => a.campaign_id === chosen.id) : setOn).filter((a) => a.day >= week).length;
-    const rows = campaigns.map((c) => ({ c, t: per.get(c.id) ?? { calls: 0, entered: 0, site: 0, last: null }, l: listTotals.get(c.id) ?? { files: 0, rows: 0, worked: 0 } }))
+    const rows = campaigns.map((c) => ({ c, t: per.get(c.id) ?? { calls: 0, connected: 0, entered: 0, site: 0, last: null }, l: listTotals.get(c.id) ?? { files: 0, rows: 0, worked: 0 } }))
       .sort((x, y) => (y.t.entered + y.t.site) - (x.t.entered + x.t.site) || y.t.calls - x.t.calls);
     const unlinked = setInRange.filter((a) => !a.campaign_id).length;
     const top = Math.max(1, ...rows.map((r) => r.t.calls));
 
     // Day by day for the chosen campaign.
-    const days = new Map<string, { calls: number; entered: number; site: number }>();
+    const days = new Map<string, { calls: number; connected: number; entered: number; site: number }>();
     if (chosen) {
-      for (const s of scopedStats) { const t = days.get(s.stat_date) ?? { calls: 0, entered: 0, site: 0 }; t.calls += s.calls_made; t.entered += s.appointments_set; days.set(s.stat_date, t); }
-      for (const a of scopedSet) { const t = days.get(a.day) ?? { calls: 0, entered: 0, site: 0 }; t.site += 1; days.set(a.day, t); }
+      for (const s of scopedStats) { const t = days.get(s.stat_date) ?? { calls: 0, connected: 0, entered: 0, site: 0 }; t.calls += s.calls_made; t.connected += s.calls_connected ?? 0; t.entered += s.appointments_set; days.set(s.stat_date, t); }
+      for (const a of scopedSet) { const t = days.get(a.day) ?? { calls: 0, connected: 0, entered: 0, site: 0 }; t.site += 1; days.set(a.day, t); }
     }
     body = (
       <>
@@ -301,9 +303,11 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
           <label>To <input className="x-input" type="date" name="to" defaultValue={to} /></label>
           <button className="x-btn">Apply</button>
           {(from || to || chosen) && <Link className="x-btn" href={href({})} style={{ display: "inline-flex", alignItems: "center" }}>Clear</Link>}
+          {staff && <Link className="x-btn x-btn-primary" href={`/command?d=${store.id}&tab=breakdown`} style={{ display: "inline-flex", alignItems: "center", marginLeft: "auto" }}>Edit the numbers</Link>}
         </form>
         <div className="cc-stats">
           <StatCard label="Outbound calls" icon={<PhoneCall size={18} aria-hidden />} value={calls} note={`${chosen ? chosen.name : "All campaigns"} · ${from || to ? "chosen dates" : "all time"}`} tone="slate" bar={100} />
+          <StatCard label="Connection rate" icon={<Signal size={18} aria-hidden />} value={pct(connected, calls)} unit="%" note={calls ? `${connected.toLocaleString()} of ${calls.toLocaleString()} calls reached the customer` : "Add connected calls in Analytics Breakdown"} tone="amber" bar={pct(connected, calls)} />
           <StatCard label="Appointments" icon={<CalendarDays size={18} aria-hidden />} value={appts} note={calls ? `${pct(appts, calls)}% of calls set an appointment` : "All appointments set"} tone="green" bar={pct(appts, calls)} />
           <StatCard label="Last 7 days" icon={<Clock size={18} aria-hidden />} value={recent.reduce((a, s) => a + s.calls_made, 0)} note={`${recentAppts} appointments`} tone="blue" bar={100} />
           {chosen
@@ -313,9 +317,9 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
         {chosen ? (
           <Card title={`${chosen.name} by day`} note={chosen.category}>
             <Table
-              head={["Date", "Calls", "Appointments entered", "Set on the site", "Total appointments", "Conversion"]}
+              head={["Date", "Calls", "Connected", "Connection rate", "Appointments entered", "Set on the site", "Total appointments", "Conversion"]}
               empty="No activity on this campaign in these dates."
-              rows={[...days.entries()].sort((x, y) => y[0].localeCompare(x[0])).map(([dd, t]) => [day(dd), t.calls, t.entered, t.site, <strong key="t">{t.entered + t.site}</strong>, t.calls ? `${pct(t.entered + t.site, t.calls)}%` : "—"])}
+              rows={[...days.entries()].sort((x, y) => y[0].localeCompare(x[0])).map(([dd, t]) => [day(dd), t.calls, t.connected, t.calls ? `${pct(t.connected, t.calls)}%` : "—", t.entered, t.site, <strong key="t">{t.entered + t.site}</strong>, t.calls ? `${pct(t.entered + t.site, t.calls)}%` : "—"])}
             />
           </Card>
         ) : (
@@ -323,7 +327,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
             {!campaigns.length ? <p className="text-sm text-ink-muted">No campaigns yet.</p> : (
               <div className="cc-table-scroll">
                 <table className="cc-ctable">
-                  <thead><tr><th>Campaign</th><th className="num">Calls</th><th className="num">Entered</th><th className="num">On site</th><th className="num">Total</th><th>Conversion</th><th className="num">Worked / customers</th><th>Last activity</th><th>Waves</th></tr></thead>
+                  <thead><tr><th>Campaign</th><th className="num">Calls</th><th className="num">Connected</th><th className="num">Conn. rate</th><th className="num">Entered</th><th className="num">On site</th><th className="num">Total</th><th>Conversion</th><th className="num">Worked / customers</th><th>Last activity</th><th>Waves</th></tr></thead>
                   <tbody>
                     {rows.map(({ c, t, l }) => {
                       const tot = t.entered + t.site;
@@ -331,6 +335,8 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
                         <tr key={c.id}>
                           <td><Link className="text-accent" href={href({ campaign: c.id, ...(from ? { from } : {}), ...(to ? { to } : {}) })}><strong>{c.name}</strong></Link><small>{c.category}</small></td>
                           <td className="num">{t.calls.toLocaleString()}</td>
+                          <td className="num">{t.connected.toLocaleString()}</td>
+                          <td className="num">{t.calls ? `${pct(t.connected, t.calls)}%` : "—"}</td>
                           <td className="num">{t.entered}</td>
                           <td className="num">{t.site}</td>
                           <td className="num"><strong>{tot}</strong></td>
@@ -342,7 +348,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
                       );
                     })}
                   </tbody>
-                  <tfoot><tr><td>All campaigns</td><td className="num">{rows.reduce((a, r) => a + r.t.calls, 0).toLocaleString()}</td><td className="num">{rows.reduce((a, r) => a + r.t.entered, 0)}</td><td className="num">{rows.reduce((a, r) => a + r.t.site, 0)}</td><td className="num"><strong>{rows.reduce((a, r) => a + r.t.entered + r.t.site, 0)}</strong></td><td /><td /><td /><td /></tr></tfoot>
+                  <tfoot><tr><td>All campaigns</td><td className="num">{rows.reduce((a, r) => a + r.t.calls, 0).toLocaleString()}</td><td className="num">{rows.reduce((a, r) => a + r.t.connected, 0).toLocaleString()}</td><td className="num">{pct(rows.reduce((a, r) => a + r.t.connected, 0), rows.reduce((a, r) => a + r.t.calls, 0))}%</td><td className="num">{rows.reduce((a, r) => a + r.t.entered, 0)}</td><td className="num">{rows.reduce((a, r) => a + r.t.site, 0)}</td><td className="num"><strong>{rows.reduce((a, r) => a + r.t.entered + r.t.site, 0)}</strong></td><td /><td /><td /><td /></tr></tfoot>
                 </table>
               </div>
             )}
@@ -354,33 +360,117 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
   }
 
   if (tab === "breakdown") {
+    const statFields = (s?: Stat) => (
+      <>
+        <div className="cc-form-grid">
+          <Field label="Campaign"><select className="x-input" name="campaign_id" required defaultValue={s?.campaign_id ?? ""}>{[<option key="" value="" disabled>Choose a campaign</option>, ...categories.map((k) => <optgroup key={k} label={k}>{campaigns.filter((c) => c.category === k).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>)]}</select></Field>
+          <Field label="Date"><input className="x-input" type="date" name="stat_date" required defaultValue={s?.stat_date ?? today()} /></Field>
+          <Field label="Calls made"><input className="x-input" type="number" name="calls_made" min={0} step={1} required defaultValue={s?.calls_made ?? 0} /></Field>
+          <Field label="Connected calls (reached the customer)"><input className="x-input" type="number" name="calls_connected" min={0} step={1} required defaultValue={s?.calls_connected ?? 0} /></Field>
+          <Field label="Appointments set"><input className="x-input" type="number" name="appointments_set" min={0} step={1} required defaultValue={s?.appointments_set ?? 0} /></Field>
+        </div>
+        <Field label="Notes (optional)"><input className="x-input" name="notes" defaultValue={s?.notes ?? ""} /></Field>
+      </>
+    );
     body = (
       <>
         {staff && (
-          <Card title="Add an entry" note="How many calls the service team made on a campaign, and how many appointments they set.">
+          <Card title="Add an entry" note="How many calls the service team made on a campaign, how many reached the customer, and how many appointments they set. Managers and admins can edit or delete any entry below.">
             {!campaigns.length ? <p className="text-sm text-ink-muted">Add a campaign first.</p> : (
               <InlineForm action={addStat.bind(null, store.id)} submit="Add entry">
-                <div className="cc-form-grid">
-                  <Field label="Campaign"><select className="x-input" name="campaign_id" required defaultValue="">{[<option key="" value="" disabled>Choose a campaign</option>, ...categories.map((k) => <optgroup key={k} label={k}>{campaigns.filter((c) => c.category === k).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>)]}</select></Field>
-                  <Field label="Date"><input className="x-input" type="date" name="stat_date" required defaultValue={today()} /></Field>
-                  <Field label="Calls made"><input className="x-input" type="number" name="calls_made" min={0} step={1} required defaultValue={0} /></Field>
-                  <Field label="Appointments set"><input className="x-input" type="number" name="appointments_set" min={0} step={1} required defaultValue={0} /></Field>
-                </div>
-                <Field label="Notes (optional)"><input className="x-input" name="notes" /></Field>
+                {statFields()}
               </InlineForm>
             )}
           </Card>
         )}
         <Card title="Entries" note={`${stats.length} entries`}>
           <Table
-            head={staff ? ["Date", "Campaign", "Calls made", "Appointments set", "Notes", "Entered by", ""] : ["Date", "Campaign", "Calls made", "Appointments set", "Notes"]}
+            head={staff ? ["Date", "Campaign", "Calls made", "Connected", "Conn. rate", "Appointments set", "Notes", "Entered by", ""] : ["Date", "Campaign", "Calls made", "Connected", "Conn. rate", "Appointments set", "Notes"]}
             empty="No entries yet."
             rows={stats.map((s) => [
-              day(s.stat_date), names.get(s.campaign_id) ?? "—", s.calls_made, s.appointments_set, s.notes ?? "—",
-              ...(staff ? [s.entered_by, <ActionButton key="x" label="Delete" confirm="Delete this entry?" action={deleteStat.bind(null, store.id, s.id)} />] : []),
+              day(s.stat_date), names.get(s.campaign_id) ?? "—", s.calls_made, s.calls_connected ?? 0, s.calls_made ? `${pct(s.calls_connected ?? 0, s.calls_made)}%` : "—", s.appointments_set, s.notes ?? "—",
+              ...(staff ? [s.entered_by, <span key="x" className="x-filters"><ModalForm button="Edit" title="Edit entry" action={updateStat.bind(null, store.id, s.id)}>{statFields(s)}</ModalForm><ActionButton label="Delete" confirm="Delete this entry?" action={deleteStat.bind(null, store.id, s.id)} /></span>] : []),
             ])}
           />
         </Card>
+      </>
+    );
+  }
+
+  if (tab === "calls") {
+    // Calls on this store's JustCall lines, with recordings to play. Default: the last 7 days.
+    const todayLocal = localParts(new Date(), tz).date;
+    const weekAgo = localParts(new Date(Date.now() - 6 * 86400000), tz).date;
+    const fromDay = /^\d{4}-\d{2}-\d{2}$/.test(from) ? from : weekAgo;
+    const toDay = /^\d{4}-\d{2}-\d{2}$/.test(to) ? to : todayLocal;
+    const start = localToUtc(fromDay, "00:00", tz);
+    const end = new Date(localToUtc(toDay, "23:59", tz).getTime() + 59_000);
+    const direction = dir === "out" ? "Outgoing" : dir === "in" ? "Incoming" : undefined;
+    const { calls: all, lines, error, capped } = await storeCalls(store.id, start, end, { direction });
+    const agentsOn = [...new Set(all.map((c) => c.agent).filter(Boolean) as string[])].sort();
+    const shown = all.filter((c) => (!agentPick || c.agent === agentPick) && (result === "connected" ? c.connected : result === "missed" ? !c.connected : result === "recorded" ? c.hasRecording : true));
+    const connectedN = shown.filter((c) => c.connected).length;
+    const talk = shown.filter((c) => c.connected).reduce((a, c) => a + c.talk, 0);
+    const outN = shown.filter((c) => /out/i.test(c.direction)).length;
+    const PER = 50;
+    const pages = Math.max(1, Math.ceil(shown.length / PER));
+    const current = Math.min(pages, Math.max(1, Number(pageParam) || 1));
+    const mmss = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+    const keep = { from: fromDay, to: toDay, ...(dir ? { dir } : {}), ...(agentPick ? { agent: agentPick } : {}), ...(result ? { result } : {}) };
+    body = (
+      <>
+        <form className="cc-filters">
+          <input type="hidden" name="d" value={store.id} />
+          <input type="hidden" name="tab" value="calls" />
+          <label>From <input className="x-input" type="date" name="from" defaultValue={fromDay} /></label>
+          <label>To <input className="x-input" type="date" name="to" defaultValue={toDay} /></label>
+          <label>Direction <select className="x-input" name="dir" defaultValue={dir}><option value="">All calls</option><option value="out">Outbound</option><option value="in">Inbound</option></select></label>
+          <label>Agent <select className="x-input" name="agent" defaultValue={agentPick}><option value="">Everyone</option>{agentsOn.map((a) => <option key={a} value={a}>{a}</option>)}</select></label>
+          <label>Result <select className="x-input" name="result" defaultValue={result}><option value="">All</option><option value="connected">Connected</option><option value="missed">Didn&apos;t connect</option><option value="recorded">Has a recording</option></select></label>
+          <button className="x-btn">Apply</button>
+        </form>
+        {!lines.length ? (
+          <Card><p className="text-sm">This store has no JustCall line saved, so there are no calls to show. {staff ? <Link className="text-accent" href={`/stores/${store.id}`}>Add the store&apos;s JustCall number</Link> : "Ask Worldwide BDC to add it."}</p></Card>
+        ) : (
+          <>
+            {error && <p role="alert" className="text-sm" style={{ color: "#b42318" }}>{error}</p>}
+            <div className="cc-stats">
+              <StatCard label="Calls" icon={<PhoneCall size={18} aria-hidden />} value={shown.length} note={`${outN.toLocaleString()} outbound · ${(shown.length - outN).toLocaleString()} inbound`} tone="slate" bar={100} />
+              <StatCard label="Connection rate" icon={<Signal size={18} aria-hidden />} value={pct(connectedN, shown.length)} unit="%" note={`${connectedN.toLocaleString()} reached the customer`} tone="amber" bar={pct(connectedN, shown.length)} />
+              <StatCard label="Avg talk time" icon={<Clock size={18} aria-hidden />} value={connectedN ? Math.round(talk / connectedN / 60) : 0} unit=" min" note={connectedN ? `${mmss(Math.round(talk / connectedN))} per connected call` : "No connected calls"} tone="blue" bar={100} />
+              <StatCard label="Recorded" icon={<Headphones size={18} aria-hidden />} value={shown.filter((c) => c.hasRecording).length} note="Calls you can listen to" tone="violet" bar={pct(shown.filter((c) => c.hasRecording).length, shown.length)} />
+            </div>
+            <Card title="Calls" note={`From JustCall, on ${lines.map((l) => `(${l.slice(0, 3)}) ${l.slice(3, 6)}-${l.slice(6)}`).join(", ")}. Times are store time. A call is connected when the customer was on the line.${capped ? " Showing the most recent 500 calls per line; narrow the dates to see older ones." : ""}`}>
+              {!shown.length ? <p className="text-sm text-ink-muted">No calls in these dates.</p> : (
+                <div className="cc-table-scroll">
+                  <table className="cc-ctable cc-calls">
+                    <thead><tr><th>When</th><th>Agent</th><th>Customer</th><th>Result</th><th className="num">Talk</th><th>Disposition</th><th>Recording</th></tr></thead>
+                    <tbody>
+                      {shown.slice((current - 1) * PER, current * PER).map((c) => (
+                        <tr key={c.id}>
+                          <td><span className="cc-dir" data-dir={/out/i.test(c.direction) ? "out" : "in"}>{/out/i.test(c.direction) ? <PhoneOutgoing size={14} aria-label="Outbound" /> : <PhoneIncoming size={14} aria-label="Inbound" />}</span> {showLocal(c.at, tz)}</td>
+                          <td>{c.agent ?? "—"}</td>
+                          <td>{c.contactName && <strong style={{ display: "block" }}>{c.contactName}</strong>}<small>{c.contact}</small></td>
+                          <td><span className="cc-badge" data-tone={c.connected ? "green" : "slate"}>{c.connected ? "Connected" : c.type || "Not connected"}</span></td>
+                          <td className="num">{c.connected ? mmss(c.talk) : "—"}</td>
+                          <td>{c.disposition ?? "—"}{c.notes && <small style={{ display: "block" }}>{c.notes}</small>}</td>
+                          <td>{c.hasRecording ? <span className="cc-rec"><audio controls preload="none" src={`/api/calls/recording?d=${store.id}&id=${c.id}`} /><a href={`/api/calls/recording?d=${store.id}&id=${c.id}&download=1`} className="text-accent">Download</a></span> : <span className="text-ink-muted">—</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {pages > 1 && (
+                <div className="x-filters" style={{ marginTop: 10 }}>
+                  {current > 1 && <Link className="x-btn" href={href({ ...keep, page: String(current - 1) })} style={{ display: "inline-flex", alignItems: "center" }}>Previous</Link>}
+                  <span className="text-sm">Page {current} of {pages}</span>
+                  {current < pages && <Link className="x-btn" href={href({ ...keep, page: String(current + 1) })} style={{ display: "inline-flex", alignItems: "center" }}>Next</Link>}
+                </div>
+              )}
+            </Card>
+          </>
+        )}
       </>
     );
   }

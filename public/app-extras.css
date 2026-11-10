@@ -1151,3 +1151,12 @@ span.cc-wave { cursor: default; }
 .svc-mover { display: flex; align-items: center; gap: 6px; justify-content: flex-end; margin: 0 0 -1px; padding: 6px 8px; background: #eef2f8; border: 1px dashed #c9d2e0; border-bottom: 0; border-radius: 6px 6px 0 0; font-size: 12.5px; }
 .svc-mover span { margin-right: auto; font-weight: 600; color: #475467; }
 .svc-mover .x-btn { height: 30px; padding: 0 10px; font-size: 12.5px; }
+/* Call recordings */
+.cc-calls td { vertical-align: middle; }
+.cc-calls small { color: var(--ink-muted, #6b7280); font-size: 12px; }
+.cc-dir { display: inline-flex; vertical-align: -2px; }
+.cc-dir[data-dir="out"] { color: #1f5fbf; }
+.cc-dir[data-dir="in"] { color: #15803d; }
+.cc-rec { display: flex; align-items: center; gap: 8px; }
+.cc-rec audio { height: 32px; width: 230px; }
+.cc-rec a { font-size: 12.5px; }
