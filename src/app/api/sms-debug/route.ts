@@ -16,10 +16,10 @@ export async function GET(req: Request) {
   const wait = () => new Promise((r) => setTimeout(r, 2500));
   // Each body leaves out or empties the members, so JustCall can only answer with what's missing; nothing is created.
   const bodies: Record<string, unknown>[] = [
-    { group_name: "probe", justcall_number: line, body: "x", members: [1] },
-    { group_name: "probe", justcall_number: line, body: "x", members: [{}] },
+    { group_name: "probe", justcall_number: line, body: "x", members: [{ type: "contact" }] },
+    { group_name: "probe", justcall_number: line, body: "x", members: [{ type: "agent" }] },
   ];
   for (const [i, body] of bodies.entries()) { await peek(`create${i}`, "/texts/groups", { method: "POST", body: JSON.stringify(body) }); await wait(); }
-  await peek("messages", "/texts/groups/0/messages?justcall_number=" + encodeURIComponent(line));
+  // await peek("messages", "/texts/groups/0/messages?justcall_number=" + encodeURIComponent(line));
   return NextResponse.json(out);
 }
