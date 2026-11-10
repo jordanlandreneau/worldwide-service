@@ -52,17 +52,21 @@ export async function storeCalls(storeId: string, from: Date, to: Date, opts: { 
           { justcall_number: e164(line).replace(/^\+/, ""), from_datetime: stamp(from), to_datetime: stamp(to), per_page: "100", page: String(page) },
           { justcall_number: e164(line), from_datetime: stamp(from).slice(0, 10), to_datetime: stamp(to).slice(0, 10), per_page: "100", page: String(page) },
         ];
-        let res: Response | null = null;
-        let why = "";
-        for (const t of tries) {
+        const ask = (t: Record<string, string>) => {
           const q = new URLSearchParams(t);
           if (opts.direction) q.set("call_direction", opts.direction);
-          res = await justcall(`/calls?${q}`);
-          if (res.ok) break;
+          return justcall(`/calls?${q}`);
+        };
+        let res = await ask(tries[0]);
+        let why = "";
+        for (let k = 1; !res.ok && res.status === 400 && k < tries.length; k++) {
           why = (await res.text().catch(() => "")).slice(0, 300);
-          if (res.status !== 400) break;
+          res = await ask(tries[k]);
         }
-        if (!res || !res.ok) throw new Error(res?.status === 401 || res?.status === 403 ? "JustCall refused the request. Check the JustCall API key in Vercel." : `JustCall said ${res?.status}: ${why}`);
+        if (!res.ok) {
+          if (!why) why = (await res.text().catch(() => "")).slice(0, 300);
+          throw new Error(res.status === 401 || res.status === 403 ? "JustCall refused the request. Check the JustCall API key in Vercel." : `JustCall said ${res.status}: ${why}`);
+        }
         const body = await res.json();
         const list = (body?.data ?? []) as any[];
         out.push(...list.map(toCall));
