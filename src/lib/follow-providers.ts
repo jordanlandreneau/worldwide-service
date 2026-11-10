@@ -49,6 +49,32 @@ export async function linqSend(groupId: string | null, text: string): Promise<Se
   return { ok: true, externalId: body?.message?.id ?? body?.id };
 }
 
+// Starts a new Linq text group with the chat's members and sends the first message into it.
+// The sender is LINQ_FROM_NUMBER, or the first number on the Linq account.
+export async function linqStart(phones: string[], text: string): Promise<Sent & { groupId?: string }> {
+  const token = process.env.LINQ_API_TOKEN;
+  if (!token) return { ok: false, error: "Text isn't connected yet: LINQ_API_TOKEN is missing." };
+  const e164 = (v: string) => { const d = v.replace(/\D/g, ""); return d.length === 10 ? `+1${d}` : d.length === 11 && d.startsWith("1") ? `+${d}` : d.length > 6 ? `+${d}` : ""; };
+  const to = [...new Set(phones.map(e164).filter(Boolean))];
+  if (!to.length) return { ok: false, error: "Add the store people's phone numbers in the Roster first, then send again to start the text group." };
+  if (/https?:\/\/|www\./i.test(text)) return { ok: false, error: "The first message of a new text group can't contain a link. Send a short hello first." };
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" };
+  let from = process.env.LINQ_FROM_NUMBER ?? "";
+  if (!from) {
+    const r = await fetch("https://api.linqapp.com/api/partner/v3/phone_numbers", { headers }).catch(() => null);
+    const b = r?.ok ? ((await r.json().catch(() => ({}))) as any) : null;
+    const list = (b?.phone_numbers ?? b?.data ?? (Array.isArray(b) ? b : [])) as any[];
+    from = String(list[0]?.phone_number ?? list[0]?.number ?? list[0] ?? "");
+  }
+  if (!from) return { ok: false, error: "Linq needs the number to text from. Add LINQ_FROM_NUMBER (your Linq phone number, like +15615551234) in Vercel." };
+  const res = await fetch("https://api.linqapp.com/api/partner/v3/chats", { method: "POST", headers, body: JSON.stringify({ from: e164(from) || from, to, message: { parts: [{ type: "text", value: text }] } }) });
+  const body = (await res.json().catch(() => ({}))) as any;
+  if (!res.ok) return { ok: false, error: res.status === 401 || res.status === 403 ? "Linq refused the token. Re-paste LINQ_API_TOKEN in Vercel." : `Linq couldn't start the group (${res.status})${body?.message ? `: ${body.message}` : body?.error?.message ? `: ${body.error.message}` : ""}.` };
+  const groupId = body?.chat?.id ?? body?.id;
+  if (!groupId) return { ok: false, error: "Linq started the group but didn't return its id." };
+  return { ok: true, externalId: body?.message?.id, groupId };
+}
+
 // ---------- Microsoft Teams (delegated sign-in of the BDC's Teams account) ----------
 type MsTokens = { refresh: string; access?: string; expires?: number; account?: string; name?: string };
 export const teamsConfigured = () => !!(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET);

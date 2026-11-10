@@ -1166,3 +1166,7 @@ span.cc-wave { cursor: default; }
 .mw-days .today i { background: repeating-linear-gradient(45deg, #1f5fbf 0 4px, #6f9be0 4px 8px); }
 .mw-days span { position: absolute; top: -14px; font-size: 10px; color: #475467; }
 .mw-days small { font-size: 9.5px; color: #98a2b3; margin-top: 3px; }
+/* A message that didn't send stays readable: dark text on the pink background. */
+.fu-app[data-theme="light"] .fu-bubble.failed, .fu-app[data-theme="light"] .fu-bubble.failed * { color: #3b1214 !important; }
+.fu-app[data-theme="light"] .fu-bubble.failed .fu-notsent { color: #b42318 !important; font-weight: 600; }
+.fu-bubble.failed { border: 1px solid #f1b8b1; }

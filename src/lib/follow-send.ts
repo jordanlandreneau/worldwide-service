@@ -1,6 +1,7 @@
 import "server-only";
 import { escapeHtml } from "@/lib/mail";
-import { googleChatReady, googleChatSend, linqReady, linqSend, teamsConfigured, teamsSend } from "@/lib/follow-providers";
+import { googleChatReady, googleChatSend, linqReady, linqSend, linqStart, teamsConfigured, teamsSend } from "@/lib/follow-providers";
+import { db } from "@/lib/data";
 
 // Delivers a message to a dealership chat on its own channel.
 // Each channel turns on when its keys are set in Vercel; until then it says what's missing.
@@ -28,7 +29,13 @@ export async function deliver(chat: Chat, members: Member[], text: string, subje
   try {
     if (chat.channel === "email") return await email(members, text, subject);
     if (chat.channel === "whatsapp") return await whatsapp(chat, text);
-    if (chat.channel === "sms") return await linqSend(chat.linq_group_id, text);
+    if (chat.channel === "sms") {
+      if (chat.linq_group_id) return await linqSend(chat.linq_group_id, text);
+      // No group yet: start one with the Roster's phone numbers and keep its id on the chat.
+      const started = await linqStart(members.map((m) => m.phone ?? "").filter(Boolean), text);
+      if (started.ok && started.groupId) await db().from("follow_chats").update({ linq_group_id: started.groupId }).eq("id", chat.id);
+      return started.ok ? { ok: true, externalId: started.externalId } : started;
+    }
     if (chat.channel === "teams") return await teamsSend(chat.teams_chat_id, text);
     if (chat.channel === "google_chat") return await googleChatSend(chat.google_chat_space, text);
     return { ok: false, error: `${CHANNELS[chat.channel]} isn't connected to the Service site yet.` };

@@ -15,7 +15,7 @@ export function ChatFields({ chat, stores }: { chat?: any; stores: { id: string;
       <Field label="Teams chat id (Teams chats)"><input className="x-input" name="teams_chat_id" defaultValue={chat?.teams_chat_id ?? ""} placeholder="19:...@thread.v2" /></Field>
       <Field label="Google Chat space (Google Chat)"><input className="x-input" name="google_chat_space" defaultValue={chat?.google_chat_space ?? ""} placeholder="spaces/AAAA..." /></Field>
       <Field label="Slack channel id (Slack chats)"><input className="x-input" name="slack_channel_id" defaultValue={chat?.slack_channel_id ?? ""} placeholder="C0123456789" /></Field>
-      <Field label="Linq group id (text chats)"><input className="x-input" name="linq_group_id" defaultValue={chat?.linq_group_id ?? ""} /></Field>
+      <Field label="Linq group id (text chats)"><input className="x-input" name="linq_group_id" defaultValue={chat?.linq_group_id ?? ""} placeholder="Leave blank to start a new text group" /><small className="text-ink-muted" style={{ display: "block", marginTop: 4 }}>Blank: the first message you send starts a new Linq group with the phone numbers in the Roster.</small></Field>
       {chat && <label className="text-sm" style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" name="active" defaultChecked={chat.active} /> Chat is on</label>}
     </>
   );
