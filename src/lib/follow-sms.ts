@@ -7,20 +7,15 @@ import { e164, justcall, lineKey } from "@/lib/justcall";
 
 type SmsChat = { id: string; dealership_id?: string | null; justcall_line?: string | null };
 
-// The line a chat texts from: its own override, else the store's Service line, else the store line.
+// The line a chat texts from: the store profile's "JustCall number (Service line)", unless the chat names its own.
 export async function smsLine(chat: SmsChat): Promise<string | null> {
   if (lineKey(chat.justcall_line).length === 10) return lineKey(chat.justcall_line);
   if (!chat.dealership_id) return null;
   const client = db();
-  const [{ data: dept }, { data: store }] = await Promise.all([
-    client.from("departments").select("id").ilike("name", "service").maybeSingle(),
-    client.from("dealerships").select("just_call_number").eq("id", chat.dealership_id).maybeSingle(),
-  ]);
-  if (dept?.id) {
-    const { data: link } = await client.from("dealership_departments").select("just_call_number").eq("dealership_id", chat.dealership_id).eq("department_id", dept.id).maybeSingle();
-    if (lineKey(link?.just_call_number).length === 10) return lineKey(link!.just_call_number);
-  }
-  return lineKey(store?.just_call_number).length === 10 ? lineKey(store!.just_call_number) : null;
+  const { data: dept } = await client.from("departments").select("id").ilike("name", "service").maybeSingle();
+  if (!dept?.id) return null;
+  const { data: link } = await client.from("dealership_departments").select("just_call_number").eq("dealership_id", chat.dealership_id).eq("department_id", dept.id).maybeSingle();
+  return lineKey(link?.just_call_number).length === 10 ? lineKey(link!.just_call_number) : null;
 }
 
 async function sendOne(line: string, to: string, body: string) {
@@ -35,7 +30,7 @@ async function sendOne(line: string, to: string, body: string) {
 export async function smsSend(chat: SmsChat, phones: string[], text: string) {
   if (!process.env.JUSTCALL_API_KEY || !process.env.JUSTCALL_API_SECRET) return { ok: false as const, error: "JustCall isn't connected: JUSTCALL_API_KEY is missing." };
   const line = await smsLine(chat);
-  if (!line) return { ok: false as const, error: "This chat's store has no JustCall number. Add it on the store page, or set a JustCall number in the chat's settings." };
+  if (!line) return { ok: false as const, error: "This chat's store has no Service line. Add the JustCall number (Service line) on the store profile, then send again." };
   const to = [...new Set(phones.map((p) => lineKey(p)).filter((p) => p.length === 10 && p !== line))];
   if (!to.length) return { ok: false as const, error: "Add the store people's mobile numbers in the Roster, then send again." };
   if (text.length > 1600) return { ok: false as const, error: "Texts can be at most 1,600 characters." };

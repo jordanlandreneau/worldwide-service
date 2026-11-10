@@ -204,7 +204,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
     const people = members.get(chat.id) ?? [];
     const store = stores.find((s: any) => s.id === chat.dealership_id);
     const ch = chat.channel as Channel;
-    const ident = chat.whatsapp_group_id ?? chat.teams_chat_id ?? chat.google_chat_space ?? (ch === "sms" ? (chat.justcall_line ? `JustCall ${chat.justcall_line}` : store ? "Texts from the store’s JustCall number" : null) : null) ?? chat.slack_channel_id;
+    const ident = chat.whatsapp_group_id ?? chat.teams_chat_id ?? chat.google_chat_space ?? (ch === "sms" ? (chat.justcall_line ? `JustCall ${chat.justcall_line}` : store ? "Texts from the store’s Service line" : null) : null) ?? chat.slack_channel_id;
     return (
       <>
         <header className="fu-detail-head">

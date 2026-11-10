@@ -15,7 +15,7 @@ export function ChatFields({ chat, stores }: { chat?: any; stores: { id: string;
       <Field label="Teams chat id (Teams chats)"><input className="x-input" name="teams_chat_id" defaultValue={chat?.teams_chat_id ?? ""} placeholder="19:...@thread.v2" /></Field>
       <Field label="Google Chat space (Google Chat)"><input className="x-input" name="google_chat_space" defaultValue={chat?.google_chat_space ?? ""} placeholder="spaces/AAAA..." /></Field>
       <Field label="Slack channel id (Slack chats)"><input className="x-input" name="slack_channel_id" defaultValue={chat?.slack_channel_id ?? ""} placeholder="C0123456789" /></Field>
-      <Field label="JustCall number to text from (SMS chats, optional)"><input className="x-input" name="justcall_line" defaultValue={chat?.justcall_line ?? ""} placeholder="Blank = the store's JustCall number" /><small className="text-ink-muted" style={{ display: "block", marginTop: 4 }}>Texts go to every phone in the Roster from the store&apos;s JustCall number (its Service line if it has one). Replies from those phones show up here.</small></Field>
+      <Field label="JustCall number to text from (SMS chats, optional)"><input className="x-input" name="justcall_line" defaultValue={chat?.justcall_line ?? ""} placeholder="Blank = the store's Service line" /><small className="text-ink-muted" style={{ display: "block", marginTop: 4 }}>Texts go to every phone in the Roster from the store profile&apos;s JustCall number (Service line). Replies from those phones show up here.</small></Field>
       {chat && <label className="text-sm" style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" name="active" defaultChecked={chat.active} /> Chat is on</label>}
     </>
   );
