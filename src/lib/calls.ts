@@ -49,10 +49,11 @@ export async function storeCalls(storeId: string, from: Date, to: Date, opts: { 
     await Promise.all(lines.map(async (line) => {
       for (let page = 0; page < (opts.maxPages ?? 5); page++) {
         // JustCall is strict about these parameters; try the full filter first, then simpler forms.
+        // JustCall matches the line as 1XXXXXXXXXX (no plus sign); times are UTC.
+        const num = e164(line).replace(/^\+/, "");
         const tries: Record<string, string>[] = [
-          { justcall_number: e164(line), from_datetime: stamp(from), to_datetime: stamp(to), per_page: "100", page: String(page), sort: "id", order: "desc" },
-          { justcall_number: e164(line).replace(/^\+/, ""), from_datetime: stamp(from), to_datetime: stamp(to), per_page: "100", page: String(page) },
-          { justcall_number: e164(line), from_datetime: stamp(from).slice(0, 10), to_datetime: stamp(to).slice(0, 10), per_page: "100", page: String(page) },
+          { justcall_number: num, from_datetime: stamp(from), to_datetime: stamp(to), per_page: "100", page: String(page), sort: "id", order: "desc" },
+          { justcall_number: num, from_datetime: stamp(from), to_datetime: stamp(to), per_page: "100", page: String(page) },
         ];
         const ask = (t: Record<string, string>) => {
           const q = new URLSearchParams(t);
