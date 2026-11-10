@@ -1,14 +1,14 @@
 import "server-only";
 import { escapeHtml } from "@/lib/mail";
-import { googleChatReady, googleChatSend, linqReady, linqSend, linqStart, teamsConfigured, teamsSend } from "@/lib/follow-providers";
-import { db } from "@/lib/data";
+import { googleChatReady, googleChatSend, teamsConfigured, teamsSend } from "@/lib/follow-providers";
+import { smsSend } from "@/lib/follow-sms";
 
 // Delivers a message to a dealership chat on its own channel.
 // Each channel turns on when its keys are set in Vercel; until then it says what's missing.
 
 export type Chat = {
   id: string; name: string; channel: "whatsapp" | "teams" | "email" | "google_chat" | "sms" | "slack";
-  whatsapp_group_id: string | null; teams_chat_id: string | null; google_chat_space: string | null; linq_group_id: string | null; slack_channel_id?: string | null;
+  whatsapp_group_id: string | null; teams_chat_id: string | null; google_chat_space: string | null; dealership_id?: string | null; justcall_line?: string | null; slack_channel_id?: string | null;
 };
 export type Member = { name: string; phone: string | null; email: string | null };
 export type Sent = { ok: true; externalId?: string } | { ok: false; error: string };
@@ -19,7 +19,7 @@ import { CHANNEL_NAMES as CHANNELS } from "@/lib/follow-channels";
 export function channelReady(channel: Chat["channel"]) {
   if (channel === "email") return !!(process.env.RESEND_API_KEY && (process.env.FOLLOW_UP_EMAIL_FROM || process.env.INVITE_EMAIL_FROM));
   if (channel === "whatsapp") return !!((process.env.PERISKOPE_API_KEY ?? process.env.PERISKOPE_API) && process.env.PERISKOPE_PHONE);
-  if (channel === "sms") return linqReady();
+  if (channel === "sms") return !!process.env.JUSTCALL_API_KEY && !!process.env.JUSTCALL_API_SECRET;
   if (channel === "teams") return teamsConfigured();
   if (channel === "google_chat") return googleChatReady();
   return false;
@@ -30,11 +30,9 @@ export async function deliver(chat: Chat, members: Member[], text: string, subje
     if (chat.channel === "email") return await email(members, text, subject);
     if (chat.channel === "whatsapp") return await whatsapp(chat, text);
     if (chat.channel === "sms") {
-      if (chat.linq_group_id) return await linqSend(chat.linq_group_id, text);
-      // No group yet: start one with the Roster's phone numbers and keep its id on the chat.
-      const started = await linqStart(members.map((m) => m.phone ?? "").filter(Boolean), text);
-      if (started.ok && started.groupId) await db().from("follow_chats").update({ linq_group_id: started.groupId }).eq("id", chat.id);
-      return started.ok ? { ok: true, externalId: started.externalId } : started;
+      // Through JustCall, from the dealership's number, to each phone in the Roster.
+      const r = await smsSend(chat, members.map((m) => m.phone ?? ""), text);
+      return r.ok ? { ok: true, externalId: r.externalId } : r;
     }
     if (chat.channel === "teams") return await teamsSend(chat.teams_chat_id, text);
     if (chat.channel === "google_chat") return await googleChatSend(chat.google_chat_space, text);

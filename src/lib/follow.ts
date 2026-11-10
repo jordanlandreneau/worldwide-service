@@ -18,7 +18,7 @@ async function loadChat(id: string) {
   if (!UUID.test(id)) return null;
   const client = db();
   const [{ data: chat }, { data: members }] = await Promise.all([
-    client.from("follow_chats").select("id,name,channel,whatsapp_group_id,teams_chat_id,google_chat_space,linq_group_id,slack_channel_id,active").eq("id", id).maybeSingle(),
+    client.from("follow_chats").select("id,name,channel,whatsapp_group_id,teams_chat_id,google_chat_space,dealership_id,justcall_line,slack_channel_id,active").eq("id", id).maybeSingle(),
     client.from("follow_members").select("name,phone,email").eq("chat_id", id),
   ]);
   return chat ? { chat: chat as Chat & { active: boolean }, members: (members ?? []) as Member[] } : null;
@@ -116,7 +116,7 @@ export async function saveChat(id: string | null, _: Result, f: FormData): Promi
   const fields = {
     name, channel, dealership_id: store,
     whatsapp_group_id: text(f, "whatsapp_group_id", 120), teams_chat_id: text(f, "teams_chat_id", 200),
-    google_chat_space: text(f, "google_chat_space", 120), linq_group_id: text(f, "linq_group_id", 120), slack_channel_id: text(f, "slack_channel_id", 120),
+    google_chat_space: text(f, "google_chat_space", 120), justcall_line: text(f, "justcall_line", 40), slack_channel_id: text(f, "slack_channel_id", 120),
     active: id ? f.get("active") !== null : true,
   };
   const client = db();

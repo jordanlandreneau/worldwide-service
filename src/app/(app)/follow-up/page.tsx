@@ -43,7 +43,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   // Everything the page needs is read at once.
   const [teams, chats, stores, { data: unreadRows }, { data: memberRows }] = await Promise.all([
     teamsConfigured() ? teamsAccount().catch(() => null) : Promise.resolve(null),
-    fetchAll<any>("follow_chats", "id,name,channel,dealership_id,active,last_activity,whatsapp_group_id,teams_chat_id,google_chat_space,linq_group_id,slack_channel_id", "name"),
+    fetchAll<any>("follow_chats", "id,name,channel,dealership_id,active,last_activity,whatsapp_group_id,teams_chat_id,google_chat_space,justcall_line,slack_channel_id", "name"),
     fetchAll<any>("dealerships", "id,name,active", "name"),
     // "Pending" means store messages nobody has answered or acknowledged yet.
     client.from("follow_messages").select("chat_id").eq("direction", "inbound").is("handled_kind", null).limit(5000),
@@ -204,7 +204,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
     const people = members.get(chat.id) ?? [];
     const store = stores.find((s: any) => s.id === chat.dealership_id);
     const ch = chat.channel as Channel;
-    const ident = chat.whatsapp_group_id ?? chat.teams_chat_id ?? chat.google_chat_space ?? chat.linq_group_id ?? chat.slack_channel_id;
+    const ident = chat.whatsapp_group_id ?? chat.teams_chat_id ?? chat.google_chat_space ?? (ch === "sms" ? (chat.justcall_line ? `JustCall ${chat.justcall_line}` : store ? "Texts from the store’s JustCall number" : null) : null) ?? chat.slack_channel_id;
     return (
       <>
         <header className="fu-detail-head">

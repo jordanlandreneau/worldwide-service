@@ -1,4 +1,5 @@
 import "server-only";
+import { justcall } from "@/lib/justcall";
 import { createCipheriv, createDecipheriv, createHash, createSign, randomBytes } from "node:crypto";
 import { db } from "@/lib/data";
 import { SITE_URL } from "@/lib/site";
@@ -31,48 +32,6 @@ function unseal(sealed: string) {
   const d = createDecipheriv("aes-256-gcm", tokenKey(), b.subarray(0, 12));
   d.setAuthTag(b.subarray(12, 28));
   return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString("utf8");
-}
-
-// ---------- Linq (text groups) ----------
-export const linqReady = () => !!process.env.LINQ_API_TOKEN;
-export async function linqSend(groupId: string | null, text: string): Promise<Sent> {
-  const token = process.env.LINQ_API_TOKEN;
-  if (!token) return { ok: false, error: "Text isn't connected yet: LINQ_API_TOKEN is missing." };
-  if (!groupId) return { ok: false, error: "This chat has no Linq group id. Add it in the chat's settings." };
-  const url = `https://api.linqapp.com/api/partner/v3/chats/${encodeURIComponent(groupId)}/messages`;
-  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-  const parts = [{ type: "text", value: text }];
-  let res = await fetch(url, { method: "POST", headers, body: JSON.stringify({ message: { parts } }) });
-  if (res.status === 400 || res.status === 422) res = await fetch(url, { method: "POST", headers, body: JSON.stringify({ parts }) });
-  if (!res.ok) return { ok: false, error: `Linq refused the message (${res.status}).` };
-  const body = (await res.json().catch(() => ({}))) as any;
-  return { ok: true, externalId: body?.message?.id ?? body?.id };
-}
-
-// Starts a new Linq text group with the chat's members and sends the first message into it.
-// The sender is LINQ_FROM_NUMBER, or the first number on the Linq account.
-export async function linqStart(phones: string[], text: string): Promise<Sent & { groupId?: string }> {
-  const token = process.env.LINQ_API_TOKEN;
-  if (!token) return { ok: false, error: "Text isn't connected yet: LINQ_API_TOKEN is missing." };
-  const e164 = (v: string) => { const d = v.replace(/\D/g, ""); return d.length === 10 ? `+1${d}` : d.length === 11 && d.startsWith("1") ? `+${d}` : d.length > 6 ? `+${d}` : ""; };
-  const to = [...new Set(phones.map(e164).filter(Boolean))];
-  if (!to.length) return { ok: false, error: "Add the store people's phone numbers in the Roster first, then send again to start the text group." };
-  if (/https?:\/\/|www\./i.test(text)) return { ok: false, error: "The first message of a new text group can't contain a link. Send a short hello first." };
-  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" };
-  let from = process.env.LINQ_FROM_NUMBER ?? "";
-  if (!from) {
-    const r = await fetch("https://api.linqapp.com/api/partner/v3/phone_numbers", { headers }).catch(() => null);
-    const b = r?.ok ? ((await r.json().catch(() => ({}))) as any) : null;
-    const list = (b?.phone_numbers ?? b?.data ?? (Array.isArray(b) ? b : [])) as any[];
-    from = String(list[0]?.phone_number ?? list[0]?.number ?? list[0] ?? "");
-  }
-  if (!from) return { ok: false, error: "Linq needs the number to text from. Add LINQ_FROM_NUMBER (your Linq phone number, like +15615551234) in Vercel." };
-  const res = await fetch("https://api.linqapp.com/api/partner/v3/chats", { method: "POST", headers, body: JSON.stringify({ from: e164(from) || from, to, message: { parts: [{ type: "text", value: text }] } }) });
-  const body = (await res.json().catch(() => ({}))) as any;
-  if (!res.ok) return { ok: false, error: res.status === 401 || res.status === 403 ? "Linq refused the token. Re-paste LINQ_API_TOKEN in Vercel." : `Linq couldn't start the group (${res.status})${body?.message ? `: ${body.message}` : body?.error?.message ? `: ${body.error.message}` : ""}.` };
-  const groupId = body?.chat?.id ?? body?.id;
-  if (!groupId) return { ok: false, error: "Linq started the group but didn't return its id." };
-  return { ok: true, externalId: body?.message?.id, groupId };
 }
 
 // ---------- Microsoft Teams (delegated sign-in of the BDC's Teams account) ----------
@@ -201,7 +160,7 @@ export async function googleChatSend(space: string | null, text: string): Promis
 export type Check = { channel: string; ok: boolean; detail: string };
 const status = async (res: Response) => `${res.status}${res.ok ? "" : ` ${(await res.text().catch(() => "")).slice(0, 160)}`}`;
 
-export async function checkConnections(sample: { whatsapp?: string | null; linq?: string | null; teams?: string | null; space?: string | null }): Promise<Check[]> {
+export async function checkConnections(sample: { whatsapp?: string | null; teams?: string | null; space?: string | null }): Promise<Check[]> {
   const out: Check[] = [];
   const run = async (channel: string, fn: () => Promise<{ ok: boolean; detail: string }>) => {
     try { out.push({ channel, ...(await fn()) }); } catch (e) { out.push({ channel, ok: false, detail: e instanceof Error ? e.message : "failed" }); }
@@ -222,12 +181,10 @@ export async function checkConnections(sample: { whatsapp?: string | null; linq?
     const body = res.ok ? ((await res.json().catch(() => ({}))) as any) : null;
     return { ok: res.ok, detail: res.ok ? `Key works; read group "${body?.chat_name ?? body?.chat?.chat_name ?? sample.whatsapp}"` : `Periskope answered ${await status(res)}` };
   });
-  await run("Text (Linq)", async () => {
-    const token = process.env.LINQ_API_TOKEN;
-    if (!token) return { ok: false, detail: "LINQ_API_TOKEN is missing" };
-    const url = sample.linq ? `https://api.linqapp.com/api/partner/v3/chats/${encodeURIComponent(sample.linq)}` : "https://api.linqapp.com/api/partner/v3/chats?limit=1";
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    return { ok: res.ok, detail: res.ok ? "Token works; read a text group" : `Linq answered ${await status(res)}` };
+  await run("Text (JustCall)", async () => {
+    if (!process.env.JUSTCALL_API_KEY || !process.env.JUSTCALL_API_SECRET) return { ok: false, detail: "JUSTCALL_API_KEY or JUSTCALL_API_SECRET is missing" };
+    const res = await justcall("/texts?per_page=1", undefined, 0);
+    return { ok: res.ok, detail: res.ok ? "Key works; texts go out from each store's JustCall number" : `JustCall answered ${await status(res)}` };
   });
   await run("Microsoft Teams", async () => {
     if (!teamsConfigured()) return { ok: false, detail: "Microsoft keys are missing" };

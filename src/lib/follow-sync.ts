@@ -2,6 +2,7 @@ import "server-only";
 import { db } from "@/lib/data";
 import { saveInbound } from "@/lib/follow-inbound";
 import { type Pulled, teamsPull } from "@/lib/follow-providers";
+import { smsPull } from "@/lib/follow-sms";
 
 // Saves only the messages this chat doesn't have yet (one lookup per chat), and returns how many were new.
 async function saveNew(chatId: string, list: Pulled[]) {
@@ -53,7 +54,15 @@ export async function pullWhatsApp(force = false) {
   return counts.reduce((a, b) => a + b, 0);
 }
 
+// Text replies: incoming JustCall texts on each chat's line from a Roster phone.
+export async function pullSms(force = false) {
+  const prev = await claim("sms_sync", force ? 0 : 20_000);
+  if (prev === null) return 0;
+  const since = prev ? Math.min(Date.now() - 10 * 60_000, prev - 5 * 60_000) : Date.now() - 2 * 86400_000;
+  return smsPull(saveNew as any, since);
+}
+
 export async function pullAll() {
-  const [teams, whatsapp] = await Promise.all([pullTeams().catch(() => 0), pullWhatsApp().catch(() => 0)]);
-  return teams + whatsapp;
+  const [teams, whatsapp, sms] = await Promise.all([pullTeams().catch(() => 0), pullWhatsApp().catch(() => 0), pullSms().catch(() => 0)]);
+  return teams + whatsapp + sms;
 }
