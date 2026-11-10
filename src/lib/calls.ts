@@ -20,8 +20,10 @@ export async function storeLines(storeId: string): Promise<string[]> {
   return [...new Set(all)];
 }
 
-// A call "connected" when there was a conversation with the customer.
-const isConnected = (c: any) => Number(c?.call_duration?.conversation_time ?? 0) > 0 || /^answered$/i.test(String(c?.call_info?.type ?? ""));
+// A call "connected" when the customer was on the line for a real conversation: at least 10 seconds of talk.
+// (A few seconds is usually a voicemail greeting or a hang-up.)
+export const CONNECT_SECONDS = 10;
+const isConnected = (c: any) => Number(c?.call_duration?.conversation_time ?? 0) >= CONNECT_SECONDS;
 
 function toCall(c: any): Call {
   return {

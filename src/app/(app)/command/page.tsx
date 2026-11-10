@@ -437,10 +437,10 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
             <div className="cc-stats">
               <StatCard label="Calls" icon={<PhoneCall size={18} aria-hidden />} value={shown.length} note={`${outN.toLocaleString()} outbound · ${(shown.length - outN).toLocaleString()} inbound`} tone="slate" bar={100} />
               <StatCard label="Connection rate" icon={<Signal size={18} aria-hidden />} value={pct(connectedN, shown.length)} unit="%" note={`${connectedN.toLocaleString()} reached the customer`} tone="amber" bar={pct(connectedN, shown.length)} />
-              <StatCard label="Avg talk time" icon={<Clock size={18} aria-hidden />} value={connectedN ? Math.round(talk / connectedN / 60) : 0} unit=" min" note={connectedN ? `${mmss(Math.round(talk / connectedN))} per connected call` : "No connected calls"} tone="blue" bar={100} />
+              <StatCard label="Avg talk time" icon={<Clock size={18} aria-hidden />} value={connectedN ? Math.round(talk / connectedN) : 0} unit=" sec" note={connectedN ? `${mmss(Math.round(talk / connectedN))} per connected call` : "No connected calls"} tone="blue" bar={100} />
               <StatCard label="Recorded" icon={<Headphones size={18} aria-hidden />} value={shown.filter((c) => c.hasRecording).length} note="Calls you can listen to" tone="violet" bar={pct(shown.filter((c) => c.hasRecording).length, shown.length)} />
             </div>
-            <Card title="Calls" note={`From JustCall, on ${lines.map((l) => `(${l.slice(0, 3)}) ${l.slice(3, 6)}-${l.slice(6)}`).join(", ")}. Times are store time. A call is connected when the customer was on the line.${capped ? " Showing the most recent 500 calls per line; narrow the dates to see older ones." : ""}`}>
+            <Card title="Calls" note={`From JustCall, on ${lines.map((l) => `(${l.slice(0, 3)}) ${l.slice(3, 6)}-${l.slice(6)}`).join(", ")}. Times are store time. A call counts as connected when the customer talked for 10 seconds or more.${capped ? " Showing the most recent 500 calls per line; narrow the dates to see older ones." : ""}`}>
               {!shown.length ? <p className="text-sm text-ink-muted">No calls in these dates.</p> : (
                 <div className="cc-table-scroll">
                   <table className="cc-ctable cc-calls">
@@ -451,8 +451,8 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
                           <td><span className="cc-dir" data-dir={/out/i.test(c.direction) ? "out" : "in"}>{/out/i.test(c.direction) ? <PhoneOutgoing size={14} aria-label="Outbound" /> : <PhoneIncoming size={14} aria-label="Inbound" />}</span> {showLocal(c.at, tz)}</td>
                           <td>{c.agent ?? "—"}</td>
                           <td>{c.contactName && <strong style={{ display: "block" }}>{c.contactName}</strong>}<small>{c.contact}</small></td>
-                          <td><span className="cc-badge" data-tone={c.connected ? "green" : "slate"}>{c.connected ? "Connected" : c.type || "Not connected"}</span></td>
-                          <td className="num">{c.connected ? mmss(c.talk) : "—"}</td>
+                          <td><span className="cc-badge" data-tone={c.connected ? "green" : "slate"}>{c.connected ? "Connected" : c.talk > 0 ? "Under 10 sec" : c.type || "Not connected"}</span></td>
+                          <td className="num">{c.talk ? mmss(c.talk) : "—"}</td>
                           <td>{c.disposition ?? "—"}{c.notes && <small style={{ display: "block" }}>{c.notes}</small>}</td>
                           <td>{c.hasRecording ? <span className="cc-rec"><audio controls preload="none" src={`/api/calls/recording?d=${store.id}&id=${c.id}`} /><a href={`/api/calls/recording?d=${store.id}&id=${c.id}&download=1`} className="text-accent">Download</a></span> : <span className="text-ink-muted">—</span>}</td>
                         </tr>
