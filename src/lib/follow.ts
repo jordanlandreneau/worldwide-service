@@ -18,7 +18,7 @@ async function loadChat(id: string) {
   if (!UUID.test(id)) return null;
   const client = db();
   const [{ data: chat }, { data: members }] = await Promise.all([
-    client.from("follow_chats").select("id,name,channel,whatsapp_group_id,teams_chat_id,google_chat_space,dealership_id,justcall_line,slack_channel_id,active").eq("id", id).maybeSingle(),
+    client.from("follow_chats").select("id,name,channel,whatsapp_group_id,teams_chat_id,google_chat_space,dealership_id,justcall_line,justcall_group_id,slack_channel_id,active").eq("id", id).maybeSingle(),
     client.from("follow_members").select("name,phone,email").eq("chat_id", id),
   ]);
   return chat ? { chat: chat as Chat & { active: boolean }, members: (members ?? []) as Member[] } : null;

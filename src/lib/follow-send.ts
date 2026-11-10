@@ -8,7 +8,7 @@ import { smsSend } from "@/lib/follow-sms";
 
 export type Chat = {
   id: string; name: string; channel: "whatsapp" | "teams" | "email" | "google_chat" | "sms" | "slack";
-  whatsapp_group_id: string | null; teams_chat_id: string | null; google_chat_space: string | null; dealership_id?: string | null; justcall_line?: string | null; slack_channel_id?: string | null;
+  whatsapp_group_id: string | null; teams_chat_id: string | null; google_chat_space: string | null; dealership_id?: string | null; justcall_line?: string | null; justcall_group_id?: string | null; slack_channel_id?: string | null;
 };
 export type Member = { name: string; phone: string | null; email: string | null };
 export type Sent = { ok: true; externalId?: string } | { ok: false; error: string };
