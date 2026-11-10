@@ -91,7 +91,7 @@ export async function teamsSend(chatId: string | null, text: string): Promise<Se
 }
 
 // Reads recent Teams messages for each Teams chat (all chats at once) and hands the store's messages to save.
-export type Pulled = { body: string; sender: string | null; senderName: string | null; externalId: string; at: string };
+export type Pulled = { body: string; sender: string | null; senderName: string | null; externalId: string; at: string; ours?: boolean };
 export async function teamsPull(chats: { id: string; teams_chat_id: string | null }[], save: (chatId: string, list: Pulled[]) => Promise<number>) {
   const token = await teamsAccess().catch(() => null);
   if (!token) return 0;
@@ -179,7 +179,7 @@ export async function googleChatSend(space: string | null, text: string, senderE
 type GTokens = { refresh: string; access?: string; expires?: number; account?: string; name?: string; user?: string };
 export const googleUserConfigured = () => !!(process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET);
 export const googleRedirect = () => `${SITE_URL}/api/public/google-auth-callback`;
-const G_SCOPES = "openid email profile https://www.googleapis.com/auth/chat.spaces.readonly https://www.googleapis.com/auth/chat.messages https://www.googleapis.com/auth/chat.memberships";
+const G_SCOPES = "openid email profile https://www.googleapis.com/auth/chat.spaces.readonly https://www.googleapis.com/auth/chat.messages https://www.googleapis.com/auth/chat.memberships https://www.googleapis.com/auth/directory.readonly";
 
 export function googleSignInUrl(state: string) {
   const q = new URLSearchParams({ client_id: process.env.GOOGLE_OAUTH_CLIENT_ID ?? "", response_type: "code", redirect_uri: googleRedirect(), scope: G_SCOPES, state, access_type: "offline", prompt: "consent select_account", hd: "worldwidebdc.com" });
@@ -254,24 +254,88 @@ export async function googleSpaces(): Promise<{ name: string; displayName: strin
   return out;
 }
 
-// New messages in each Google Chat chat, except the ones the BDC account sent.
-export async function googlePull(chats: { id: string; google_chat_space: string | null }[], since: Date, save: (chatId: string, list: Pulled[]) => Promise<number>) {
+// Google Chat only gives user ids (users/123). Names and emails come from the company directory
+// (People API), kept in follow_integrations "google_people" so each person is looked up once.
+type Person = { email: string | null; name: string | null };
+export async function googlePeople(ids: string[]): Promise<Map<string, Person>> {
+  const out = new Map<string, Person>();
+  const want = [...new Set(ids.filter((i) => /^users\/\d+$/.test(i)))];
+  if (!want.length) return out;
+  const cache = ((await getState<Record<string, Person>>("google_people")) ?? {}) as Record<string, Person>;
+  const missing = want.filter((i) => !cache[i]);
+  if (missing.length) {
+    const token = await googleUserAccess().catch(() => null);
+    if (token) {
+      for (let i = 0; i < missing.length; i += 50) {
+        const q = new URLSearchParams({ personFields: "names,emailAddresses" });
+        for (const id of missing.slice(i, i + 50)) q.append("resourceNames", id.replace(/^users\//, "people/"));
+        for (const src of ["READ_SOURCE_TYPE_PROFILE", "READ_SOURCE_TYPE_CONTACT", "READ_SOURCE_TYPE_DOMAIN_CONTACT"]) q.append("sources", src);
+        const res = await fetch(`https://people.googleapis.com/v1/people:batchGet?${q}`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+        if (!res?.ok) break;
+        for (const r of (((await res.json().catch(() => ({}))) as any).responses ?? []) as any[]) {
+          const id = String(r.requestedResourceName ?? "").replace(/^people\//, "users/");
+          const p = r.person ?? {};
+          cache[id] = { email: p.emailAddresses?.[0]?.value?.toLowerCase() ?? null, name: p.names?.[0]?.displayName ?? null };
+        }
+      }
+      await setState("google_people", cache);
+    }
+  }
+  for (const i of want) if (cache[i]) out.set(i, cache[i]);
+  return out;
+}
+
+// The people in a space, with names and emails where the directory has them.
+export async function googleSpaceMembers(space: string): Promise<Person[]> {
   const token = await googleUserAccess().catch(() => null);
-  if (!token) return 0;
-  // Our own messages (the shared account or any agent who connected theirs) aren't store messages.
+  if (!token) return [];
+  const ids: string[] = [];
+  let page = "";
+  for (let i = 0; i < 5; i++) {
+    const q = new URLSearchParams({ pageSize: "1000", ...(page ? { pageToken: page } : {}) });
+    const res = await fetch(`https://chat.googleapis.com/v1/${space}/members?${q}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) break;
+    const body = (await res.json().catch(() => ({}))) as any;
+    for (const m of body.memberships ?? []) if (m.member?.type === "HUMAN" && m.member?.name) ids.push(m.member.name);
+    page = body.nextPageToken ?? "";
+    if (!page) break;
+  }
+  const people = await googlePeople(ids);
+  return ids.map((id) => people.get(id) ?? { email: null, name: null });
+}
+
+// Messages in a Google Chat chat since a time. Messages from Worldwide BDC people (anyone @worldwidebdc.com,
+// or a connected account) are marked as ours, so they show as our side and never as "needs reply".
+export async function googleMessages(space: string, since: Date, maxPages = 1): Promise<Pulled[]> {
+  const token = await googleUserAccess().catch(() => null);
+  if (!token || !/^spaces\/[\w-]+$/.test(space)) return [];
   const { data: ours } = await db().from("follow_integrations").select("data").like("name", "google_chat_user%");
   const mine = new Set(((ours ?? []) as any[]).map((r) => r.data?.user).filter(Boolean));
-  const counts = await Promise.all(chats.filter((c) => c.google_chat_space && /^spaces\/[\w-]+$/.test(c.google_chat_space)).map(async (c) => {
-    try {
-      const q = new URLSearchParams({ pageSize: "100", orderBy: "createTime desc", filter: `createTime > "${since.toISOString()}"` });
-      const res = await fetch(`https://chat.googleapis.com/v1/${c.google_chat_space}/messages?${q}`, { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) return 0;
-      const list = (((await res.json().catch(() => ({}))) as any).messages ?? []) as any[];
-      const out: Pulled[] = list.reverse()
-        .filter((m) => m.sender?.type !== "BOT" && !mine.has(m.sender?.name) && String(m.text ?? m.formattedText ?? "").trim())
-        .map((m) => ({ body: String(m.text ?? "").trim(), sender: m.sender?.name ?? null, senderName: m.sender?.displayName || null, externalId: m.name, at: m.createTime }));
-      return await save(c.id, out);
-    } catch { return 0; }
+  const list: any[] = [];
+  let page = "";
+  for (let i = 0; i < maxPages; i++) {
+    const q = new URLSearchParams({ pageSize: "100", orderBy: "createTime desc", filter: `createTime > "${since.toISOString()}"`, ...(page ? { pageToken: page } : {}) });
+    const res = await fetch(`https://chat.googleapis.com/v1/${space}/messages?${q}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) break;
+    const body = (await res.json().catch(() => ({}))) as any;
+    list.push(...(body.messages ?? []));
+    page = body.nextPageToken ?? "";
+    if (!page) break;
+  }
+  const humans = list.filter((m) => m.sender?.type !== "BOT" && String(m.text ?? "").trim());
+  const people = await googlePeople(humans.map((m) => m.sender?.name));
+  return humans.reverse().map((m) => {
+    const who = people.get(m.sender?.name);
+    const ours = mine.has(m.sender?.name) || !!who?.email?.endsWith("@worldwidebdc.com");
+    return { body: String(m.text).trim(), sender: who?.email ?? m.sender?.name ?? null, senderName: who?.name ?? m.sender?.displayName ?? null, externalId: m.name, at: m.createTime, ours };
+  });
+}
+
+// New messages in each Google Chat chat (store messages and our team's).
+export async function googlePull(chats: { id: string; google_chat_space: string | null }[], since: Date, save: (chatId: string, list: Pulled[]) => Promise<number>) {
+  if (!(await googleUserAccess().catch(() => null))) return 0;
+  const counts = await Promise.all(chats.filter((c) => c.google_chat_space).map(async (c) => {
+    try { return await save(c.id, await googleMessages(c.google_chat_space!, since)); } catch { return 0; }
   }));
   return counts.reduce((a, b) => a + b, 0);
 }

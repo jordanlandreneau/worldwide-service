@@ -204,6 +204,16 @@ export async function setMemberEmail(chatId: string, id: string, _: Result, f: F
   return { ok: true };
 }
 
+export async function syncGoogleChat(chatId: string, _: Result, __: FormData): Promise<Result> {
+  await requireUser("manager");
+  if (!UUID.test(chatId)) return { error: "This chat no longer exists." };
+  const { backfillGoogleChat } = await import("@/lib/follow-sync");
+  const r = await backfillGoogleChat(chatId);
+  refresh(chatId);
+  if (!r.messages && !r.people && r.unknown) return { error: `No new messages or people. ${r.unknown} people in the space couldn't be looked up; a manager should click Reconnect & import spaces once so the site can read the company directory.` };
+  return { ok: true };
+}
+
 export async function syncWhatsAppNames(chatId: string, _: Result, __: FormData): Promise<Result> {
   await requireUser("manager");
   const found = await loadChat(chatId);

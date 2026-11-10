@@ -3,6 +3,7 @@ import { atLeast, getUser } from "@/lib/access";
 import { googleFinishSignIn } from "@/lib/follow-providers";
 import { importGoogleSpaces } from "@/lib/follow-sync";
 import { SITE_URL } from "@/lib/site";
+import { db } from "@/lib/data";
 
 export async function GET(request: NextRequest) {
   const back = (s: string, n?: number) => {
@@ -25,6 +26,10 @@ export async function GET(request: NextRequest) {
     return back("failed");
   }
   if (mine) return back("mine");
+  // A fresh sign-in may bring more permissions (like the company directory): redo each chat's history and Roster.
+  await db().from("follow_integrations").delete().like("name", "gbackfill:%");
+  await db().from("follow_integrations").delete().eq("name", "google_people");
+  await db().from("follow_integrations").delete().eq("name", "google_spaces");
   const added = await importGoogleSpaces(user.email).catch(() => 0);
   return back("connected", added);
 }

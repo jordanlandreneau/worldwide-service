@@ -7,7 +7,7 @@ import { Composer } from "@/components/follow-composer";
 import { ChatFields } from "@/components/follow-chat-fields";
 import { atLeast, requireUser } from "@/lib/access";
 import { db, fetchAll } from "@/lib/data";
-import { acknowledge, addMember, bulkAddMembers, deleteChat, markRead, removeMember, reopen, saveChat, sendFollowUp, sendReply, setMemberEmail, syncWhatsAppNames } from "@/lib/follow";
+import { acknowledge, addMember, bulkAddMembers, deleteChat, markRead, removeMember, reopen, saveChat, sendFollowUp, sendReply, setMemberEmail, syncGoogleChat, syncWhatsAppNames } from "@/lib/follow";
 import { CHANNELS, channelReady } from "@/lib/follow-send";
 import { googleAccount, googleSpaces, googleUserConfigured, teamsAccount, teamsConfigured } from "@/lib/follow-providers";
 import { DesktopAlerts } from "@/components/follow-live";
@@ -341,6 +341,11 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
             </ModalForm>
             {chat.channel === "whatsapp" && (
               <ModalForm button="Sync names from WhatsApp" title="Sync names from WhatsApp" note="Renames people on this roster to the names they use in the WhatsApp group, matched by phone number." action={syncWhatsAppNames.bind(null, chat.id)} submit="Sync names">
+                <span />
+              </ModalForm>
+            )}
+            {chat.channel === "google_chat" && chat.google_chat_space && (
+              <ModalForm button="Sync from Google Chat" title="Sync from Google Chat" note="Brings over the last 30 days of messages and adds everyone in the Google Chat space to this Roster (with their name and email where the company directory has them)." action={syncGoogleChat.bind(null, chat.id)} submit="Sync now">
                 <span />
               </ModalForm>
             )}

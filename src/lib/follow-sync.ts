@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "@/lib/data";
 import { saveInbound } from "@/lib/follow-inbound";
-import { googlePull, googleSpaces, type Pulled, teamsPull } from "@/lib/follow-providers";
+import { googleMessages, googlePull, googleSpaceMembers, googleSpaces, type Pulled, teamsPull } from "@/lib/follow-providers";
 import { smsPull } from "@/lib/follow-sms";
 
 // Saves only the messages this chat doesn't have yet (one lookup per chat), and returns how many were new.
@@ -11,7 +11,15 @@ async function saveNew(chatId: string, list: Pulled[]) {
   const { data } = await db().from("follow_messages").select("external_id").eq("chat_id", chatId).in("external_id", ids);
   const have = new Set(((data ?? []) as any[]).map((r) => r.external_id));
   const fresh = list.filter((m) => !have.has(m.externalId));
-  for (const m of fresh) await saveInbound(chatId, { body: m.body, sender: m.sender, senderName: m.senderName, externalId: m.externalId, at: m.at });
+  const ours = fresh.filter((m) => m.ours);
+  if (ours.length) {
+    // Our team's messages (sent in the chat app itself) are kept as our side of the conversation.
+    await db().from("follow_messages").upsert(ours.map((m) => ({
+      chat_id: chatId, direction: "outbound", body: m.body.slice(0, 8000), sender: m.sender, sender_name: m.senderName, status: "sent",
+      external_id: m.externalId, read: true, created_at: new Date(m.at).toISOString(),
+    })), { onConflict: "chat_id,external_id", ignoreDuplicates: true });
+  }
+  for (const m of fresh.filter((x) => !x.ours)) await saveInbound(chatId, { body: m.body, sender: m.sender, senderName: m.senderName, externalId: m.externalId, at: m.at });
   return fresh.length;
 }
 
@@ -67,8 +75,15 @@ export async function pullGoogle(force = false) {
   const prev = await claim("google_sync", force ? 0 : 20_000);
   if (prev === null) return 0;
   const since = new Date(prev ? Math.min(Date.now() - 10 * 60_000, prev - 5 * 60_000) : Date.now() - 2 * 86400_000);
-  // Every 5 minutes, also pick up spaces created or joined since the last look (new stores being onboarded).
-  if ((await claim("google_spaces", 5 * 60_000)) !== null) await importGoogleSpaces("google-sync").catch(() => 0);
+  // Every 5 minutes, also pick up spaces created or joined since the last look (new stores being onboarded),
+  // and bring over the history and Roster of any Google Chat chat that hasn't had that yet.
+  if ((await claim("google_spaces", 5 * 60_000)) !== null) {
+    await importGoogleSpaces("google-sync").catch(() => 0);
+    const { data: all } = await db().from("follow_chats").select("id,google_chat_space").eq("channel", "google_chat").not("google_chat_space", "is", null);
+    const { data: done } = await db().from("follow_integrations").select("name").like("name", "gbackfill:%");
+    const did = new Set(((done ?? []) as any[]).map((r) => r.name));
+    for (const c of ((all ?? []) as any[]).filter((c) => !did.has(`gbackfill:${c.id}`)).slice(0, 10)) await backfillGoogleChat(c.id).catch(() => null);
+  }
   const { data: chats } = await db().from("follow_chats").select("id,google_chat_space").eq("channel", "google_chat").eq("active", true).not("google_chat_space", "is", null);
   return googlePull((chats ?? []) as any[], since, saveNew);
 }
@@ -105,4 +120,22 @@ export async function importGoogleSpaces(by: string) {
 export async function pullAll() {
   const [teams, whatsapp, sms, google] = await Promise.all([pullTeams().catch(() => 0), pullWhatsApp().catch(() => 0), pullSms().catch(() => 0), pullGoogle().catch(() => 0)]);
   return teams + whatsapp + sms + google;
+}
+
+// The last 30 days of messages and the space's members, for a Google Chat chat. Safe to run again.
+export async function backfillGoogleChat(chatId: string) {
+  const client = db();
+  const { data: chat } = await client.from("follow_chats").select("id,google_chat_space").eq("id", chatId).maybeSingle();
+  if (!chat?.google_chat_space) return { messages: 0, people: 0 };
+  const msgs = await googleMessages(chat.google_chat_space, new Date(Date.now() - 30 * 86400_000), 5);
+  const messages = await saveNew(chatId, msgs);
+  // History isn't new work: older store messages count as already seen.
+  await client.from("follow_messages").update({ read: true }).eq("chat_id", chatId).eq("direction", "inbound").lt("created_at", new Date(Date.now() - 86400_000).toISOString());
+  const members = await googleSpaceMembers(chat.google_chat_space);
+  const { data: have } = await client.from("follow_members").select("email,name").eq("chat_id", chatId);
+  const known = new Set(((have ?? []) as any[]).map((m) => String(m.email ?? "").toLowerCase()).filter(Boolean));
+  const add = members.filter((m) => m.email && !known.has(m.email));
+  if (add.length) await client.from("follow_members").insert(add.map((m) => ({ chat_id: chatId, name: (m.name ?? m.email!.split("@")[0]).slice(0, 120), email: m.email, role: "member" })));
+  await client.from("follow_integrations").upsert({ name: `gbackfill:${chatId}`, data: { messages, people: add.length, unknown: members.filter((m) => !m.email).length }, updated_at: new Date().toISOString() });
+  return { messages, people: add.length, unknown: members.filter((m) => !m.email).length };
 }
