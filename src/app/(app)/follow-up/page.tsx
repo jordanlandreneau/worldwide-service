@@ -9,7 +9,7 @@ import { atLeast, requireUser } from "@/lib/access";
 import { db, fetchAll } from "@/lib/data";
 import { acknowledge, addMember, bulkAddMembers, deleteChat, markRead, removeMember, reopen, saveChat, sendFollowUp, sendReply, setMemberEmail, syncWhatsAppNames } from "@/lib/follow";
 import { CHANNELS, channelReady } from "@/lib/follow-send";
-import { googleAccount, googleUserConfigured, teamsAccount, teamsConfigured } from "@/lib/follow-providers";
+import { googleAccount, googleSpaces, googleUserConfigured, teamsAccount, teamsConfigured } from "@/lib/follow-providers";
 import { DesktopAlerts } from "@/components/follow-live";
 
 export const metadata = { title: "Follow-ups · Worldwide Service" };
@@ -59,6 +59,8 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   const channels = Object.keys(CHANNELS) as Channel[];
   const selected = sp.chat && UUID.test(sp.chat) ? chats.find((c: any) => c.id === sp.chat) : undefined;
   const channel: Channel = (channels.includes(sp.channel as Channel) ? sp.channel : selected?.channel ?? "whatsapp") as Channel;
+  // The connected Google account's spaces, so a Google Chat chat picks its space from a list.
+  const spaceList = channel === "google_chat" && google && manager ? await googleSpaces().catch(() => []) : [];
   const activeStores = stores.filter((s: any) => s.active !== false).map((s: any) => ({ id: s.id as string, name: s.name as string }));
   const link = (p: Params) => {
     const q = new URLSearchParams();
@@ -152,7 +154,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
             </form>
             {manager && (
               <ModalForm button="+ Add dealership chat" title="New chat" note="Add a store's follow-up chat. The id comes from the chat app." action={saveChat.bind(null, null)} submit="Add chat">
-                <ChatFields chat={{ channel, active: true }} stores={activeStores} />
+                <ChatFields chat={{ channel, active: true }} stores={activeStores} spaces={spaceList} />
               </ModalForm>
             )}
           </div>
@@ -227,7 +229,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
             {ident && <CopyButton value={ident} />}
             {manager && (
               <ModalForm button="Settings" title="Chat settings" action={saveChat.bind(null, chat.id)}>
-                <ChatFields chat={chat} stores={stores.filter((s: any) => s.active !== false || s.id === chat.dealership_id)} />
+                <ChatFields chat={chat} stores={stores.filter((s: any) => s.active !== false || s.id === chat.dealership_id)} spaces={spaceList} />
               </ModalForm>
             )}
             {manager && <ActionButton label="Delete" confirm={`Delete "${chat.name}", its roster and its messages? This can't be undone.`} action={deleteChat.bind(null, chat.id)} />}
