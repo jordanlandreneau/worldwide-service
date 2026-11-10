@@ -67,9 +67,14 @@ export async function pullGoogle(force = false) {
   const prev = await claim("google_sync", force ? 0 : 20_000);
   if (prev === null) return 0;
   const since = new Date(prev ? Math.min(Date.now() - 10 * 60_000, prev - 5 * 60_000) : Date.now() - 2 * 86400_000);
+  // Every 5 minutes, also pick up spaces created or joined since the last look (new stores being onboarded).
+  if ((await claim("google_spaces", 5 * 60_000)) !== null) await importGoogleSpaces("google-sync").catch(() => 0);
   const { data: chats } = await db().from("follow_chats").select("id,google_chat_space").eq("channel", "google_chat").eq("active", true).not("google_chat_space", "is", null);
   return googlePull((chats ?? []) as any[], since, saveNew);
 }
+
+// "Andy Mohr Honda // WWBDC Follow Up's" → "andy mohr honda": the part that names the store.
+const storeWords = (v: string) => v.toLowerCase().split(/\/\/|\||\s-\s/)[0].replace(/\(.*?\)/g, " ").replace(/\b(wwbdc|worldwide|bdc|follow ?ups?'?s?|service|chat|new)\b/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
 
 // Adds a Follow-ups chat for every Google Chat space the signed-in account is in that isn't here yet.
 export async function importGoogleSpaces(by: string) {
@@ -80,8 +85,21 @@ export async function importGoogleSpaces(by: string) {
   const known = new Set(((have ?? []) as any[]).map((c) => c.google_chat_space));
   const fresh = spaces.filter((sp) => !known.has(sp.name));
   if (!fresh.length) return 0;
-  const { error } = await client.from("follow_chats").insert(fresh.map((sp) => ({ name: sp.displayName.slice(0, 200), channel: "google_chat", google_chat_space: sp.name, active: true, created_by: by })));
-  return error ? 0 : fresh.length;
+  // Link the store when exactly one active store matches the space's name.
+  const { data: stores } = await client.from("dealerships").select("id,name,active");
+  const active = ((stores ?? []) as any[]).filter((x) => x.active !== false).map((x) => ({ id: x.id as string, key: storeWords(x.name) })).filter((x) => x.key.length >= 4);
+  const storeFor = (name: string) => {
+    const k = storeWords(name);
+    if (k.length < 4) return null;
+    const hits = active.filter((x) => x.key === k);
+    const loose = hits.length ? hits : active.filter((x) => k.includes(x.key) || x.key.includes(k));
+    return loose.length === 1 ? loose[0].id : null;
+  };
+  const { error } = await client.from("follow_chats").insert(fresh.map((sp) => ({ name: sp.displayName.slice(0, 200), channel: "google_chat", google_chat_space: sp.name, dealership_id: storeFor(sp.displayName), active: true, created_by: by })));
+  if (error) return 0;
+  // A popup for managers and admins, so a new store's space doesn't go unnoticed.
+  await client.from("site_events").insert(fresh.map((sp) => ({ kind: "onboarding", dealership_id: storeFor(sp.displayName), title: `New Google Chat added: ${sp.displayName.slice(0, 120)}`, body: storeFor(sp.displayName) ? "Linked to its store automatically." : "Open its Settings to pick the store.", link: "/follow-up?channel=google_chat", created_by: by })));
+  return fresh.length;
 }
 
 export async function pullAll() {
