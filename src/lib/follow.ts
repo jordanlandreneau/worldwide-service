@@ -1,4 +1,5 @@
 "use server";
+import { googleAddMember, googleRemoveMember } from "@/lib/follow-providers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/access";
@@ -143,13 +144,25 @@ export async function addMember(chatId: string, _: Result, f: FormData): Promise
   const { error } = await db().from("follow_members").insert({ chat_id: chatId, name, email, phone, role: text(f, "role", 40) ?? "member" });
   if (error) return { error: "Couldn't add this person." };
   refresh(chatId);
+  // Google Chat: the Roster is the space's membership, so add them to the space too.
+  if (email) {
+    const { data: chat } = await db().from("follow_chats").select("channel,google_chat_space").eq("id", chatId).maybeSingle();
+    if (chat?.channel === "google_chat" && chat.google_chat_space) {
+      const r = await googleAddMember(chat.google_chat_space, email);
+      if (!r.ok) return { error: r.error };
+    }
+  }
   return { ok: true };
 }
 
 export async function removeMember(chatId: string, id: string) {
   await requireUser("manager");
   if (!UUID.test(chatId) || !UUID.test(id)) return;
-  await db().from("follow_members").delete().eq("id", id).eq("chat_id", chatId);
+  const client = db();
+  const { data: m } = await client.from("follow_members").select("email").eq("id", id).eq("chat_id", chatId).maybeSingle();
+  await client.from("follow_members").delete().eq("id", id).eq("chat_id", chatId);
+  const { data: chat } = await client.from("follow_chats").select("channel,google_chat_space").eq("id", chatId).maybeSingle();
+  if (m?.email && chat?.channel === "google_chat" && chat.google_chat_space) await googleRemoveMember(chat.google_chat_space, m.email);
   refresh(chatId);
 }
 
@@ -171,6 +184,12 @@ export async function bulkAddMembers(chatId: string, _: Result, f: FormData): Pr
   const { error } = await db().from("follow_members").insert(rows);
   if (error) return { error: "Couldn't add these people." };
   refresh(chatId);
+  const { data: chat } = await db().from("follow_chats").select("channel,google_chat_space").eq("id", chatId).maybeSingle();
+  if (chat?.channel === "google_chat" && chat.google_chat_space) {
+    const failed: string[] = [];
+    for (const r of rows) if (r.email) { const x = await googleAddMember(chat.google_chat_space, r.email); if (!x.ok) failed.push(`${r.email}: ${x.error}`); }
+    if (failed.length) return { error: `Saved to the Roster, but not added to the Google Chat space: ${failed.slice(0, 3).join(" · ")}` };
+  }
   return { ok: true };
 }
 

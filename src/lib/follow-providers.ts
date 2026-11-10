@@ -179,7 +179,7 @@ export async function googleChatSend(space: string | null, text: string, senderE
 type GTokens = { refresh: string; access?: string; expires?: number; account?: string; name?: string; user?: string };
 export const googleUserConfigured = () => !!(process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET);
 export const googleRedirect = () => `${SITE_URL}/api/public/google-auth-callback`;
-const G_SCOPES = "openid email profile https://www.googleapis.com/auth/chat.spaces.readonly https://www.googleapis.com/auth/chat.messages";
+const G_SCOPES = "openid email profile https://www.googleapis.com/auth/chat.spaces.readonly https://www.googleapis.com/auth/chat.messages https://www.googleapis.com/auth/chat.memberships";
 
 export function googleSignInUrl(state: string) {
   const q = new URLSearchParams({ client_id: process.env.GOOGLE_OAUTH_CLIENT_ID ?? "", response_type: "code", redirect_uri: googleRedirect(), scope: G_SCOPES, state, access_type: "offline", prompt: "consent select_account", hd: "worldwidebdc.com" });
@@ -213,6 +213,27 @@ async function googleUserAccess(owner?: string | null): Promise<string | null> {
   const t = await gUserToken({ grant_type: "refresh_token", refresh_token: unseal(s.refresh) });
   await setState(gKey(owner), { ...s, access: seal(t.access_token), expires: Date.now() + t.expires_in * 1000 });
   return t.access_token;
+}
+
+// Adds a person to a Google Chat space (as the shared account), so adding them to the Roster really puts them in the chat.
+// People outside worldwidebdc.com can be added only if the space allows external people.
+export async function googleAddMember(space: string, email: string): Promise<{ ok: boolean; error?: string }> {
+  const token = await googleUserAccess().catch(() => null);
+  if (!token) return { ok: false, error: "Google Chat isn't connected, so they weren't added to the space." };
+  const res = await fetch(`https://chat.googleapis.com/v1/${space}/members`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ member: { name: `users/${email}`, type: "HUMAN" } }),
+  });
+  if (res.ok || res.status === 409) return { ok: true };
+  const body = (await res.json().catch(() => ({}))) as any;
+  if (res.status === 403 && /scope|insufficient/i.test(JSON.stringify(body))) return { ok: false, error: "Saved to the Roster, but Google needs one more permission to add people to spaces. A manager should click Reconnect & import spaces once, then add them again." };
+  return { ok: false, error: `Saved to the Roster, but Google Chat didn't add them to the space (${res.status}${body?.error?.message ? `: ${body.error.message}` : ""}).` };
+}
+
+export async function googleRemoveMember(space: string, email: string) {
+  const token = await googleUserAccess().catch(() => null);
+  if (!token) return;
+  await fetch(`https://chat.googleapis.com/v1/${space}/members/${encodeURIComponent(`users/${email}`)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
 }
 
 // Every named space and group chat the signed-in account is in (not 1:1 DMs).
