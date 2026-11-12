@@ -1,4 +1,5 @@
 import "server-only";
+import type { IncomingMedia, Mention } from "@/lib/follow-media";
 import { justcall } from "@/lib/justcall";
 import { createCipheriv, createDecipheriv, createHash, createSign, randomBytes } from "node:crypto";
 import { db } from "@/lib/data";
@@ -76,14 +77,39 @@ async function teamsAccess(): Promise<string | null> {
   return t.access_token;
 }
 
-export async function teamsSend(chatId: string | null, text: string): Promise<Sent> {
+// The people in a Teams chat (for @mentions): their Microsoft user id, name and email.
+export async function teamsMembers(chatId: string): Promise<{ id: string; name: string; email: string | null }[]> {
+  const token = await teamsAccess().catch(() => null);
+  if (!token) return [];
+  const res = await fetch(`https://graph.microsoft.com/v1.0/chats/${encodeURIComponent(chatId)}/members`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+  if (!res?.ok) return [];
+  return ((((await res.json().catch(() => ({}))) as any).value ?? []) as any[]).filter((m) => m.userId).map((m) => ({ id: m.userId, name: m.displayName ?? m.email ?? "Member", email: m.email?.toLowerCase() ?? null }));
+}
+
+export async function teamsSend(chatId: string | null, text: string, extras: { pictures?: { bytes: ArrayBuffer; type: string }[]; mentions?: Mention[] } = {}): Promise<Sent> {
   if (!teamsConfigured()) return { ok: false, error: "Teams isn't set up: the Microsoft keys are missing in Vercel." };
   if (!chatId) return { ok: false, error: "This chat has no Teams chat id. Add it in the chat's settings." };
   const token = await teamsAccess().catch(() => null);
   if (!token) return { ok: false, error: "Teams isn't signed in. A manager needs to click Connect Teams in Follow-ups." };
+  // @mentions: "@Name" in the text becomes a real Teams mention for people in the chat.
+  let html = esc(text).replace(/\n/g, "<br>");
+  const mentions: any[] = [];
+  if (extras.mentions?.length) {
+    const people = await teamsMembers(chatId);
+    for (const m of extras.mentions) {
+      const who = people.find((p) => (m.email && p.email === m.email.toLowerCase()) || p.name.toLowerCase() === m.name.toLowerCase());
+      const tag = `@${esc(m.name)}`;
+      if (!who || !html.includes(tag)) continue;
+      const i = mentions.length;
+      html = html.replace(tag, `<at id="${i}">${esc(who.name)}</at>`);
+      mentions.push({ id: i, mentionText: who.name, mentioned: { user: { id: who.id, displayName: who.name, userIdentityType: "aadUser" } } });
+    }
+  }
+  const hostedContents = (extras.pictures ?? []).filter((p) => p.type.startsWith("image/")).map((p, i) => ({ "@microsoft.graph.temporaryId": String(i + 1), contentBytes: Buffer.from(p.bytes).toString("base64"), contentType: p.type }));
+  for (const h of hostedContents) html += `<p><img src="../hostedContents/${h["@microsoft.graph.temporaryId"]}/$value" style="max-width:480px"></p>`;
   const res = await fetch(`https://graph.microsoft.com/v1.0/chats/${encodeURIComponent(chatId)}/messages`, {
     method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ body: { contentType: "html", content: esc(text).replace(/\n/g, "<br>") } }),
+    body: JSON.stringify({ body: { contentType: "html", content: html || "&nbsp;" }, ...(mentions.length ? { mentions } : {}), ...(hostedContents.length ? { hostedContents } : {}) }),
   });
   if (!res.ok) return { ok: false, error: `Teams refused the message (${res.status}).` };
   const body = (await res.json().catch(() => ({}))) as any;
@@ -91,7 +117,7 @@ export async function teamsSend(chatId: string | null, text: string): Promise<Se
 }
 
 // Reads recent Teams messages for each Teams chat (all chats at once) and hands the store's messages to save.
-export type Pulled = { body: string; sender: string | null; senderName: string | null; externalId: string; at: string; ours?: boolean };
+export type Pulled = { body: string; sender: string | null; senderName: string | null; externalId: string; at: string; ours?: boolean; media?: IncomingMedia[] };
 export async function teamsPull(chats: { id: string; teams_chat_id: string | null }[], save: (chatId: string, list: Pulled[]) => Promise<number>) {
   const token = await teamsAccess().catch(() => null);
   if (!token) return 0;
@@ -108,8 +134,10 @@ export async function teamsPull(chats: { id: string; teams_chat_id: string | nul
         if (!user) continue;
         if (me && String(user.userPrincipalName ?? "").toLowerCase() === me) continue;
         const html = String(m.body?.content ?? "");
+        // Pictures pasted into Teams live at .../hostedContents/{id}/$value (they need our sign-in to download).
+        const media: IncomingMedia[] = [...html.matchAll(/<img[^>]+src="(https:\/\/graph\.microsoft\.com\/[^"]+\/hostedContents\/[^"]+\/\$value)"/gi)].map((x) => ({ url: x[1].replace(/&amp;/g, "&"), auth: `Bearer ${token}` }));
         const body = html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').trim();
-        if (body) out.push({ body, sender: user.id ?? null, senderName: user.displayName ?? null, externalId: m.id, at: m.createdDateTime });
+        if (body || media.length) out.push({ body, sender: user.id ?? null, senderName: user.displayName ?? null, externalId: m.id, at: m.createdDateTime, media });
       }
       return await save(c.id, out);
     } catch { return 0; }
@@ -143,20 +171,50 @@ async function googleAccess() {
   return gToken.value;
 }
 
-export async function googleChatSend(space: string | null, text: string, senderEmail?: string | null): Promise<Sent> {
+// Uploads a picture into a space (as whoever is sending) and returns the reference a message attaches.
+async function googleUpload(token: string, space: string, file: { bytes: ArrayBuffer; type: string; name: string }) {
+  const boundary = `b${randomBytes(8).toString("hex")}`;
+  const head = Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ filename: file.name })}\r\n--${boundary}\r\nContent-Type: ${file.type}\r\n\r\n`);
+  const tail = Buffer.from(`\r\n--${boundary}--`);
+  const res = await fetch(`https://chat.googleapis.com/upload/v1/${space}/attachments:upload?uploadType=multipart`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": `multipart/related; boundary=${boundary}` },
+    body: Buffer.concat([head, Buffer.from(file.bytes), tail]),
+  });
+  if (!res.ok) return null;
+  return ((await res.json().catch(() => ({}))) as any).attachmentDataRef ?? null;
+}
+
+// "@Name" in the text becomes <users/123>, which Google Chat shows as a mention and notifies.
+async function googleMentionText(space: string, text: string, mentions: Mention[] = []) {
+  if (!mentions.length) return text;
+  const people = await googleSpaceMembers(space).catch(() => []);
+  let out = text;
+  for (const m of mentions) {
+    const who = people.find((p) => (m.email && p.email === m.email.toLowerCase()) || (p.name && p.name.toLowerCase() === m.name.toLowerCase()));
+    if (who) out = out.replace(`@${m.name}`, `<${who.id}>`);
+  }
+  return out;
+}
+
+export async function googleChatSend(space: string | null, text: string, senderEmail?: string | null, extras: { pictures?: { bytes: ArrayBuffer; type: string; name: string }[]; mentions?: Mention[] } = {}): Promise<Sent> {
   if (!space || !/^spaces\/[\w-]+$/.test(space)) return { ok: false, error: "This chat has no Google Chat space. Add it in the chat's settings (spaces/…)." };
   // The agent's own Google account first, so the message shows their name in Google Chat.
   // If they haven't connected theirs, or aren't in this space, it goes from the shared BDC account.
   if (senderEmail) {
     const own = await googleUserAccess(senderEmail).catch(() => null);
     if (own) {
-      const r = await fetch(`https://chat.googleapis.com/v1/${space}/messages`, { method: "POST", headers: { Authorization: `Bearer ${own}`, "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+      const refs = [];
+      for (const p of extras.pictures ?? []) { const r = await googleUpload(own, space, p); if (r) refs.push({ attachmentDataRef: r }); }
+      const r = await fetch(`https://chat.googleapis.com/v1/${space}/messages`, { method: "POST", headers: { Authorization: `Bearer ${own}`, "Content-Type": "application/json" }, body: JSON.stringify({ text: await googleMentionText(space, text, extras.mentions), ...(refs.length ? { attachment: refs } : {}) }) });
       if (r.ok) { const b = (await r.json().catch(() => ({}))) as any; return { ok: true, externalId: b.name }; }
     }
   }
   const user = await googleUserAccess().catch(() => null);
   if (user) {
-    const r = await fetch(`https://chat.googleapis.com/v1/${space}/messages`, { method: "POST", headers: { Authorization: `Bearer ${user}`, "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+    const refs = [];
+    for (const p of extras.pictures ?? []) { const r = await googleUpload(user, space, p); if (r) refs.push({ attachmentDataRef: r }); }
+    if ((extras.pictures ?? []).length && !refs.length) return { ok: false, error: "Google Chat didn't accept the picture." };
+    const r = await fetch(`https://chat.googleapis.com/v1/${space}/messages`, { method: "POST", headers: { Authorization: `Bearer ${user}`, "Content-Type": "application/json" }, body: JSON.stringify({ text: await googleMentionText(space, text, extras.mentions), ...(refs.length ? { attachment: refs } : {}) }) });
     if (!r.ok) return { ok: false, error: `Google Chat refused the message (${r.status}). Is the signed-in account a member of this space?` };
     const b = (await r.json().catch(() => ({}))) as any;
     return { ok: true, externalId: b.name };
@@ -286,7 +344,7 @@ export async function googlePeople(ids: string[]): Promise<Map<string, Person>> 
 }
 
 // The people in a space, with names and emails where the directory has them.
-export async function googleSpaceMembers(space: string): Promise<Person[]> {
+export async function googleSpaceMembers(space: string): Promise<(Person & { id: string })[]> {
   const token = await googleUserAccess().catch(() => null);
   if (!token) return [];
   const ids: string[] = [];
@@ -301,7 +359,7 @@ export async function googleSpaceMembers(space: string): Promise<Person[]> {
     if (!page) break;
   }
   const people = await googlePeople(ids);
-  return ids.map((id) => people.get(id) ?? { email: null, name: null });
+  return ids.map((id) => ({ id, ...(people.get(id) ?? { email: null, name: null }) }));
 }
 
 // Messages in a Google Chat chat since a time. Messages from Worldwide BDC people (anyone @worldwidebdc.com,
@@ -322,12 +380,17 @@ export async function googleMessages(space: string, since: Date, maxPages = 1): 
     page = body.nextPageToken ?? "";
     if (!page) break;
   }
-  const humans = list.filter((m) => m.sender?.type !== "BOT" && String(m.text ?? "").trim());
+  const humans = list.filter((m) => m.sender?.type !== "BOT" && (String(m.text ?? "").trim() || (m.attachment ?? []).length));
   const people = await googlePeople(humans.map((m) => m.sender?.name));
   return humans.reverse().map((m) => {
     const who = people.get(m.sender?.name);
     const ours = mine.has(m.sender?.name) || !!who?.email?.endsWith("@worldwidebdc.com");
-    return { body: String(m.text).trim(), sender: who?.email ?? m.sender?.name ?? null, senderName: who?.name ?? m.sender?.displayName ?? null, externalId: m.name, at: m.createTime, ours };
+    // Pictures uploaded in Google Chat download through the Chat media API with the same sign-in.
+    const media: IncomingMedia[] = ((m.attachment ?? []) as any[]).filter((a) => a.attachmentDataRef?.resourceName && /^image\/|pdf/.test(a.contentType ?? ""))
+      .map((a) => ({ url: `https://chat.googleapis.com/v1/media/${a.attachmentDataRef.resourceName}?alt=media`, auth: `Bearer ${token}`, name: a.contentName, type: a.contentType }));
+    // Mentions come through as <users/123>; show the person's name instead.
+    const body = String(m.text ?? "").replace(/<(users\/\d+)>/g, (_: string, id: string) => `@${people.get(id)?.name ?? "someone"}`).trim();
+    return { body, sender: who?.email ?? m.sender?.name ?? null, senderName: who?.name ?? m.sender?.displayName ?? null, externalId: m.name, at: m.createTime, ours, media };
   });
 }
 

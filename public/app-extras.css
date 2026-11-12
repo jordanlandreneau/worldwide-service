@@ -1177,3 +1177,18 @@ span.cc-wave { cursor: default; }
 .bm-console summary { cursor: pointer; color: var(--ink-muted, #6b7280); }
 .bm-console p { margin: 6px 0; }
 .bm-steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; }
+
+/* Pictures and @mentions in Follow-ups */
+.fu-pics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.fu-pics img { display: block; max-width: 240px; max-height: 220px; border-radius: 6px; border: 1px solid rgba(0,0,0,.08); object-fit: cover; background: #fff; }
+.fu-file { display: inline-block; padding: 6px 10px; border-radius: 6px; background: rgba(0,0,0,.05); font-size: 13px; }
+.fu-typing { position: relative; }
+.fu-mention { position: absolute; left: 8px; bottom: calc(100% + 4px); z-index: 30; list-style: none; margin: 0; padding: 4px; min-width: 240px; max-width: 360px; background: #fff; border: 1px solid #d0d5dd; border-radius: 8px; box-shadow: 0 8px 24px rgba(16,24,40,.16); }
+.fu-mention li { display: flex; flex-direction: column; padding: 6px 10px; border-radius: 5px; cursor: pointer; font-size: 14px; color: #10161f; }
+.fu-mention li small { color: #667085; font-size: 12px; }
+.fu-mention li[aria-selected="true"], .fu-mention li:hover { background: #eef4ff; }
+.fu-attach { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.fu-attach-item { position: relative; display: flex; flex-direction: column; align-items: center; width: 84px; font-size: 11px; }
+.fu-attach-item img, .fu-attach-item em { width: 84px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid #d0d5dd; display: flex; align-items: center; justify-content: center; font-style: normal; font-size: 26px; background: #f8fafc; }
+.fu-attach-item small { max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #667085; }
+.fu-attach-item button { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; border: 0; background: #10161f; color: #fff; font-size: 11px; cursor: pointer; }

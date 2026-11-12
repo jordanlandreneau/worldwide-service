@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/access";
 import { db } from "@/lib/data";
-import { type Chat, deliver, followUpText, type Member, whatsappNames } from "@/lib/follow-send";
+import { type Chat, deliver, type Extras, followUpText, type Member, whatsappNames } from "@/lib/follow-send";
+import { type Mention, storeUploads } from "@/lib/follow-media";
 import type { Result } from "@/lib/manage";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -25,14 +26,24 @@ async function loadChat(id: string) {
   return chat ? { chat: chat as Chat & { active: boolean }, members: (members ?? []) as Member[] } : null;
 }
 
-async function send(chatId: string, body: string, subject: string, extra: Record<string, unknown>, by: { email: string; name: string }): Promise<Result> {
+// Pictures picked in the composer and the people @-mentioned (sent as JSON by the composer).
+async function readExtras(chatId: string, f: FormData): Promise<Extras | string> {
+  const files = f.getAll("pictures").filter((x): x is File => typeof x === "object" && "arrayBuffer" in x && (x as File).size > 0);
+  const up = files.length ? await storeUploads(chatId, files) : { list: [] };
+  if (up.error) return up.error;
+  let mentions: Mention[] = [];
+  try { mentions = (JSON.parse(String(f.get("mentions") ?? "[]")) as Mention[]).filter((m) => m && typeof m.name === "string").slice(0, 20); } catch { /* none */ }
+  return { attachments: up.list, mentions };
+}
+
+async function send(chatId: string, body: string, subject: string, extra: Record<string, unknown>, by: { email: string; name: string }, extras: Extras = {}): Promise<Result> {
   const found = await loadChat(chatId);
   if (!found) return { error: "This chat no longer exists." };
   if (!found.chat.active) return { error: "This chat is turned off. A manager can turn it back on." };
-  const result = await deliver(found.chat, found.members, body, subject, by.email);
+  const result = await deliver(found.chat, found.members, body, subject, by.email, extras);
   const client = db();
   await client.from("follow_messages").insert({
-    chat_id: chatId, direction: "outbound", body, sender_name: by.name, sender: by.email, ...extra,
+    chat_id: chatId, direction: "outbound", body, sender_name: by.name, sender: by.email, ...extra, attachments: extras.attachments ?? [], mentions: extras.mentions ?? [],
     status: result.ok ? "sent" : "failed", error: result.ok ? null : result.error, external_id: result.ok ? result.externalId ?? null : null,
     read: true, created_by: by.email,
   });
@@ -64,8 +75,10 @@ export async function sendFollowUp(chatId: string, _: Result, f: FormData): Prom
 
 export async function sendReply(chatId: string, _: Result, f: FormData): Promise<Result> {
   const by = await sender();
-  const body = text(f, "body", 4000);
-  if (!body) return { error: "Type a message." };
+  const extras = await readExtras(chatId, f);
+  if (typeof extras === "string") return { error: extras };
+  const body = text(f, "body", 4000) ?? "";
+  if (!body && !extras.attachments?.length) return { error: "Type a message or add a picture." };
   const client = db();
   const { data: chat } = await client.from("follow_chats").select("name").eq("id", chatId).maybeSingle();
   // A reply is linked to the store message it answers, and that message is marked answered once it sends.
@@ -73,7 +86,7 @@ export async function sendReply(chatId: string, _: Result, f: FormData): Promise
   const { data: original } = replyTo && UUID.test(replyTo)
     ? await client.from("follow_messages").select("id").eq("id", replyTo).eq("chat_id", chatId).eq("direction", "inbound").maybeSingle()
     : { data: null };
-  const result = await send(chatId, body, `Re: ${chat?.name ?? "Follow up"}`, original ? { reply_to: original.id } : {}, by);
+  const result = await send(chatId, body, `Re: ${chat?.name ?? "Follow up"}`, original ? { reply_to: original.id } : {}, by, extras);
   if (result.ok && original) {
     await client.from("follow_messages").update({ handled_kind: "answered", handled_by: by.email, handled_name: by.name, handled_at: new Date().toISOString(), read: true }).eq("id", original.id);
     refresh(chatId);

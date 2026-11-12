@@ -2,6 +2,7 @@ import "server-only";
 import { escapeHtml } from "@/lib/mail";
 import { googleChatReady, googleChatSend, googleUserConfigured, teamsConfigured, teamsSend } from "@/lib/follow-providers";
 import { smsSend } from "@/lib/follow-sms";
+import { type Attachment, type Mention, readBytes, shareLink } from "@/lib/follow-media";
 
 // Delivers a message to a dealership chat on its own channel.
 // Each channel turns on when its keys are set in Vercel; until then it says what's missing.
@@ -25,17 +26,23 @@ export function channelReady(channel: Chat["channel"]) {
   return false;
 }
 
-export async function deliver(chat: Chat, members: Member[], text: string, subject: string, senderEmail?: string): Promise<Sent> {
+export type Extras = { attachments?: Attachment[]; mentions?: Mention[] };
+
+export async function deliver(chat: Chat, members: Member[], text: string, subject: string, senderEmail?: string, extras: Extras = {}): Promise<Sent> {
   try {
-    if (chat.channel === "email") return await email(members, text, subject);
-    if (chat.channel === "whatsapp") return await whatsapp(chat, text);
+    const files = extras.attachments ?? [];
+    // Teams and Google Chat take the picture itself; WhatsApp and texts fetch it from a 7-day link.
+    const bytes = async () => (await Promise.all(files.map(async (a) => { const f = await readBytes(a.path); return f ? { bytes: f.bytes, type: a.type, name: a.name } : null; }))).filter(Boolean) as { bytes: ArrayBuffer; type: string; name: string }[];
+    const links = async () => (await Promise.all(files.map(async (a) => ({ ...a, url: await shareLink(a.path) })))).filter((a) => a.url) as (Attachment & { url: string })[];
+    if (chat.channel === "email") return await email(members, text + ((await links()).map((a) => `\n${a.name}: ${a.url}`).join("")), subject);
+    if (chat.channel === "whatsapp") return await whatsapp(chat, text, await links(), extras.mentions ?? [], members);
     if (chat.channel === "sms") {
-      // Through JustCall, from the dealership's number, to each phone in the Roster.
-      const r = await smsSend(chat, members.map((m) => m.phone ?? ""), text);
+      // Through JustCall, from the dealership's Service line, as one group text.
+      const r = await smsSend(chat, members.map((m) => m.phone ?? ""), text, (await links()).map((a) => a.url));
       return r.ok ? { ok: true, externalId: r.externalId } : r;
     }
-    if (chat.channel === "teams") return await teamsSend(chat.teams_chat_id, text);
-    if (chat.channel === "google_chat") return await googleChatSend(chat.google_chat_space, text, senderEmail);
+    if (chat.channel === "teams") return await teamsSend(chat.teams_chat_id, text, { pictures: await bytes(), mentions: extras.mentions });
+    if (chat.channel === "google_chat") return await googleChatSend(chat.google_chat_space, text, senderEmail, { pictures: await bytes(), mentions: extras.mentions });
     return { ok: false, error: `${CHANNELS[chat.channel]} isn't connected to the Service site yet.` };
   } catch {
     return { ok: false, error: `${CHANNELS[chat.channel]} didn't answer. Try again.` };
@@ -65,17 +72,27 @@ async function email(members: Member[], text: string, subject: string): Promise<
 }
 
 // Periskope sends to WhatsApp groups from the company's WhatsApp number.
-async function whatsapp(chat: Chat, text: string): Promise<Sent> {
+async function whatsapp(chat: Chat, text: string, pictures: (Attachment & { url: string })[] = [], mentions: Mention[] = [], members: Member[] = []): Promise<Sent> {
   const key = (process.env.PERISKOPE_API_KEY ?? process.env.PERISKOPE_API);
   const phone = process.env.PERISKOPE_PHONE;
   if (!key || !phone) return { ok: false, error: "WhatsApp isn't connected yet: PERISKOPE_API_KEY and PERISKOPE_PHONE need to be set in Vercel." };
   if (!chat.whatsapp_group_id) return { ok: false, error: "This chat has no WhatsApp group id. Add it in the chat's settings." };
-  const res = await fetch("https://api.periskope.app/v1/message/send", {
+  // WhatsApp tags a person when the text has @ and their phone number.
+  let message = text;
+  for (const m of mentions) {
+    const ph = (m.phone ?? members.find((x) => x.name.toLowerCase() === m.name.toLowerCase())?.phone ?? "").replace(/\D/g, "");
+    if (ph.length >= 10) message = message.replace(`@${m.name}`, `@${ph.length === 10 ? `1${ph}` : ph}`);
+  }
+  const send = (payload: Record<string, unknown>) => fetch("https://api.periskope.app/v1/message/send", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "x-phone": phone, "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chat.whatsapp_group_id, message: text }),
+    body: JSON.stringify({ chat_id: chat.whatsapp_group_id, ...payload }),
   });
+  // One picture per WhatsApp message: the first carries the text as its caption.
+  const media = (p: Attachment & { url: string }) => ({ type: p.type.startsWith("image/") ? "image" : "document", url: p.url, filename: p.name, mimetype: p.type });
+  const res = await send(pictures.length ? { message, media: media(pictures[0]) } : { message });
   if (!res.ok) return { ok: false, error: `WhatsApp refused the message (${res.status}).` };
+  for (const p of pictures.slice(1)) await send({ media: media(p) });
   const body = (await res.json().catch(() => ({}))) as { unique_id?: string; queue_id?: string };
   return { ok: true, externalId: body.unique_id ?? body.queue_id };
 }

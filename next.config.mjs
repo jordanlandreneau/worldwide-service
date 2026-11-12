@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Outbound list uploads (CSV) can be up to 4 MB.
-  experimental: { serverActions: { bodySizeLimit: "5mb" } },
+  // Outbound list CSVs and Follow-ups pictures (up to 6 x 10 MB, usually much smaller).
+  experimental: { serverActions: { bodySizeLimit: "25mb" } },
 };
 export default nextConfig;

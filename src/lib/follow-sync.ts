@@ -3,6 +3,7 @@ import { db } from "@/lib/data";
 import { saveInbound } from "@/lib/follow-inbound";
 import { googleMessages, googlePull, googleSpaceMembers, googleSpaces, type Pulled, teamsPull } from "@/lib/follow-providers";
 import { smsPull } from "@/lib/follow-sms";
+import { storeRemote } from "@/lib/follow-media";
 
 // Saves only the messages this chat doesn't have yet (one lookup per chat), and returns how many were new.
 async function saveNew(chatId: string, list: Pulled[]) {
@@ -11,15 +12,18 @@ async function saveNew(chatId: string, list: Pulled[]) {
   const { data } = await db().from("follow_messages").select("external_id").eq("chat_id", chatId).in("external_id", ids);
   const have = new Set(((data ?? []) as any[]).map((r) => r.external_id));
   const fresh = list.filter((m) => !have.has(m.externalId));
+  // Pictures are copied into the site's storage as the message comes in (chat-app links expire).
+  const files = new Map<string, unknown[]>();
+  for (const m of fresh) if (m.media?.length) files.set(m.externalId, (await Promise.all(m.media.slice(0, 6).map((x) => storeRemote(chatId, x)))).filter(Boolean));
   const ours = fresh.filter((m) => m.ours);
   if (ours.length) {
     // Our team's messages (sent in the chat app itself) are kept as our side of the conversation.
     await db().from("follow_messages").upsert(ours.map((m) => ({
-      chat_id: chatId, direction: "outbound", body: m.body.slice(0, 8000), sender: m.sender, sender_name: m.senderName, status: "sent",
+      chat_id: chatId, direction: "outbound", body: m.body.slice(0, 8000), sender: m.sender, sender_name: m.senderName, status: "sent", attachments: files.get(m.externalId) ?? [],
       external_id: m.externalId, read: true, created_at: new Date(m.at).toISOString(),
     })), { onConflict: "chat_id,external_id", ignoreDuplicates: true });
   }
-  for (const m of fresh.filter((x) => !x.ours)) await saveInbound(chatId, { body: m.body, sender: m.sender, senderName: m.senderName, externalId: m.externalId, at: m.at });
+  for (const m of fresh.filter((x) => !x.ours)) await saveInbound(chatId, { body: m.body, sender: m.sender, senderName: m.senderName, externalId: m.externalId, at: m.at, attachments: files.get(m.externalId) ?? [] });
   return fresh.length;
 }
 
@@ -54,9 +58,16 @@ export async function pullWhatsApp(force = false) {
       const res = await fetch(`https://api.periskope.app/v1/chats/${encodeURIComponent(c.whatsapp_group_id)}/messages?limit=100&start_time=${encodeURIComponent(since)}`, { headers: { Authorization: `Bearer ${key}`, "x-phone": phone } });
       if (!res.ok) return 0;
       const list = (((await res.json()) as any).messages ?? []) as any[];
+      const mediaOf = (m: any) => {
+        const md = m.media ?? {};
+        let url = String(md.path ?? md.url ?? m.media_url ?? "");
+        if (url && url.startsWith("/")) url = `https://api.periskope.app${url}`;
+        const type = String(md.mimetype ?? md.mime_type ?? "");
+        return m.has_media !== false && /^https:\/\//.test(url) ? [{ url, type: type || undefined, name: md.filename ?? undefined, auth: url.includes("periskope.app") ? `Bearer ${key}` : undefined }] : [];
+      };
       return await saveNew(c.id, list.reverse()
-        .filter((m) => !m.from_me && typeof m.body === "string" && m.body.trim())
-        .map((m) => ({ body: m.body, sender: String(m.sender_phone ?? m.author ?? "").replace(/@.*$/, "") || null, senderName: null, externalId: m.message_id ?? m.unique_id, at: m.timestamp })));
+        .filter((m) => !m.from_me && ((typeof m.body === "string" && m.body.trim()) || mediaOf(m).length))
+        .map((m) => ({ body: String(m.body ?? "").trim(), sender: String(m.sender_phone ?? m.author ?? "").replace(/@.*$/, "") || null, senderName: null, externalId: m.message_id ?? m.unique_id, at: m.timestamp, media: mediaOf(m) })));
     } catch { return 0; }
   }));
   return counts.reduce((a, b) => a + b, 0);

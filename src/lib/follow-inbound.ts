@@ -14,7 +14,7 @@ export function checkHookKey(request: NextRequest) {
 const digits = (v: string | null) => (v ?? "").replace(/\D/g, "").slice(-10);
 
 // Saves a store's reply, naming the sender from the chat's people list when the number matches.
-export async function saveInbound(chatId: string, m: { body: string; sender: string | null; senderName?: string | null; externalId: string | null; at: string | number | null }) {
+export async function saveInbound(chatId: string, m: { body: string; sender: string | null; senderName?: string | null; externalId: string | null; at: string | number | null; attachments?: unknown[] }) {
   const client = db();
   let name: string | null = m.senderName ?? null;
   const last10 = digits(m.sender);
@@ -25,7 +25,7 @@ export async function saveInbound(chatId: string, m: { body: string; sender: str
   const when = typeof m.at === "number" || /^\d+$/.test(String(m.at ?? "")) ? new Date(Number(m.at) * (Number(m.at) < 1e12 ? 1000 : 1)) : m.at ? new Date(m.at) : new Date();
   const created_at = Number.isNaN(when.getTime()) ? new Date().toISOString() : when.toISOString();
   await client.from("follow_messages").upsert({
-    chat_id: chatId, direction: "inbound", body: m.body.slice(0, 8000), sender: m.sender, sender_name: name,
+    chat_id: chatId, direction: "inbound", body: m.body.slice(0, 8000), sender: m.sender, sender_name: name, attachments: m.attachments ?? [],
     status: "received", external_id: m.externalId, read: false, created_at,
   }, { onConflict: "chat_id,external_id", ignoreDuplicates: true });
   await client.from("follow_chats").update({ last_activity: new Date().toISOString() }).eq("id", chatId);

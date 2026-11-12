@@ -9,7 +9,7 @@ import { atLeast, requireUser } from "@/lib/access";
 import { db, fetchAll } from "@/lib/data";
 import { acknowledge, addMember, bulkAddMembers, deleteChat, markRead, removeMember, reopen, saveChat, sendFollowUp, sendReply, setMemberEmail, syncGoogleChat, syncWhatsAppNames } from "@/lib/follow";
 import { CHANNELS, channelReady } from "@/lib/follow-send";
-import { googleAccount, googleSpaces, googleUserConfigured, teamsAccount, teamsConfigured } from "@/lib/follow-providers";
+import { googleAccount, googleSpaceMembers, googleSpaces, googleUserConfigured, teamsMembers, teamsAccount, teamsConfigured } from "@/lib/follow-providers";
 import { DesktopAlerts } from "@/components/follow-live";
 
 export const metadata = { title: "Follow-ups · Worldwide Service" };
@@ -29,6 +29,18 @@ const ago = (iso: string | null) => {
   if (m < 1440) return `${Math.round(m / 60)}h ago`;
   return `${Math.round(m / 1440)}d ago`;
 };
+
+// Pictures on a message, shown small; click to open full size.
+function Pictures({ list }: { list?: { path: string; type: string; name: string }[] | null }) {
+  if (!list?.length) return null;
+  return (
+    <div className="fu-pics">
+      {list.map((a) => a.type.startsWith("image/")
+        ? <a key={a.path} href={`/api/follow-up/media?p=${encodeURIComponent(a.path)}`} target="_blank" rel="noreferrer"><img src={`/api/follow-up/media?p=${encodeURIComponent(a.path)}`} alt={a.name} loading="lazy" /></a>
+        : <a key={a.path} className="fu-file" href={`/api/follow-up/media?p=${encodeURIComponent(a.path)}`} target="_blank" rel="noreferrer">📄 {a.name}</a>)}
+    </div>
+  );
+}
 
 export default async function FollowUps({ searchParams }: { searchParams: Promise<Params> }) {
   const user = await requireUser("agent");
@@ -245,7 +257,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   }
 
   async function Thread({ chat, people }: { chat: any; people: any[] }) {
-    const { data } = await client.from("follow_messages").select("id,direction,body,sender_name,sender,kind,status,error,read,created_at,reply_to,handled_kind,handled_name,handled_at").eq("chat_id", chat.id).order("created_at", { ascending: false }).limit(200);
+    const { data } = await client.from("follow_messages").select("id,direction,body,sender_name,sender,kind,status,error,read,created_at,reply_to,handled_kind,handled_name,handled_at,attachments").eq("chat_id", chat.id).order("created_at", { ascending: false }).limit(200);
     const all = ((data ?? []) as any[]).reverse();
     const byId = new Map(all.map((m) => [m.id, m]));
     // Our replies sit under the store message they answer, not in the main stream.
@@ -256,6 +268,12 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
     const stream = onlyOpen ? open : all.filter((m) => !(m.direction === "outbound" && m.reply_to && byId.has(m.reply_to)));
     const pending = all.filter((m) => m.direction === "inbound" && !m.read).length;
     const advisors = people.filter((p) => !/wwbdc|worldwide|service bdc|management/i.test(`${p.name} ${p.email ?? ""}`)).map((p) => p.name as string);
+    // @ suggestions: the Roster plus everyone actually in the Teams chat or Google Chat space.
+    const live = chat.channel === "teams" && chat.teams_chat_id ? await teamsMembers(chat.teams_chat_id).catch(() => [])
+      : chat.channel === "google_chat" && chat.google_chat_space ? (await googleSpaceMembers(chat.google_chat_space).catch(() => [])).filter((p) => p.name).map((p) => ({ name: p.name as string, email: p.email }))
+      : [];
+    const mentionable = [...people.map((p) => ({ name: p.name as string, email: p.email ?? null, phone: p.phone ?? null })), ...live.map((p) => ({ name: p.name, email: p.email ?? null, phone: null }))]
+      .filter((p, i, arr) => p.name && p.name !== "Unnamed" && arr.findIndex((q) => q.name.toLowerCase() === p.name.toLowerCase() || (!!p.email && q.email === p.email)) === i);
     const recipients = chat.channel === "email" ? people.filter((p) => p.email).length : people.length;
     const quoted = sp.reply ? byId.get(sp.reply) : undefined;
     const who = (m: any) => (m.direction === "outbound" ? "WWBDC" : m.sender_name || m.sender || "Store");
@@ -286,7 +304,8 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
                     <span className="fu-who">{label}</span>
                     {m.direction === "inbound" && m.sender && m.sender_name && <span className="fu-mono fu-from">{m.sender}</span>}
                     {m.direction === "outbound" && m.reply_to && byId.get(m.reply_to) && <span className="fu-quote">↪ {who(byId.get(m.reply_to))}: {byId.get(m.reply_to).body.slice(0, 80)}</span>}
-                    <p>{m.body}</p>
+                    {m.body && <p>{m.body}</p>}
+                    <Pictures list={m.attachments} />
                     <span className="fu-time">{time(m.created_at)}{m.direction === "outbound" && m.sender_name ? ` · ${m.sender_name}` : ""}</span>
                     {m.status === "failed" && <span className="fu-notsent">Not sent{m.error ? `: ${m.error}` : ""}</span>}
                   </div>
@@ -305,7 +324,8 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
                       {replies.map((r) => (
                         <li key={r.id} className={`fu-bubble outbound reply${r.status === "failed" ? " failed" : ""}`}>
                           <span className="fu-who">Our reply</span>
-                          <p>{r.body}</p>
+                          {r.body && <p>{r.body}</p>}
+                          <Pictures list={r.attachments} />
                           <span className="fu-time">{time(r.created_at)}{r.sender_name ? ` · ${r.sender_name}` : ""}</span>
                           {r.status === "failed" && <span className="fu-notsent">Not sent{r.error ? `: ${r.error}` : ""}</span>}
                         </li>
@@ -320,7 +340,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
         <Composer key={`${chat.id}-${sp.reply ?? ""}-${sp.mention ?? ""}`} chatId={chat.id}
           initialText={sp.mention ? `@${sp.mention.slice(0, 80)} ` : ""}
           replyTo={quoted && quoted.direction === "inbound" ? { id: quoted.id, who: who(quoted), text: quoted.body.replace(/\s+/g, " ").slice(0, 120), cancelHref: link(here) } : undefined}
-          channel={CHANNELS[chat.channel as Channel]} recipients={recipients} advisors={advisors} sendMessage={sendReply.bind(null, chat.id)} sendDispatch={sendFollowUp.bind(null, chat.id)} />
+          channel={CHANNELS[chat.channel as Channel]} recipients={recipients} advisors={advisors} people={mentionable} sendMessage={sendReply.bind(null, chat.id)} sendDispatch={sendFollowUp.bind(null, chat.id)} />
       </>
     );
   }
