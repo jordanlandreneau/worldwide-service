@@ -10,8 +10,13 @@ export default async function XtimeExport() {
   return (
     <Page title="Xtime list export" subtitle="Pull a whole Xtime outbound call list to a CSV in one click.">
       <Card title="1. Add the button (once)">
-        <p className="text-sm" style={{ marginBottom: 12 }}>Show your bookmarks bar (Ctrl+Shift+B, or Cmd+Shift+B on a Mac), then drag this button onto it:</p>
-        <Bookmarklet src="/tools/xtime-export.js" label="⬇ Xtime list to CSV" />
+        <p className="text-sm" style={{ marginBottom: 12 }}>Show your bookmarks bar (Ctrl+Shift+B, or Cmd+Shift+B on a Mac), then drag this button onto it. It always runs the newest version, so you never need to replace it when the export gets better.</p>
+        <Bookmarklet src="/brand/xtime-loader.js" label="⬇ Xtime list to CSV" copyLabel="Can't drag it? Copy the code for a bookmark" />
+        <details className="bm-console" style={{ marginTop: 18 }}>
+          <summary>Backup button (if the one above says it couldn&apos;t load)</summary>
+          <p>This one carries the whole export inside the bookmark, so it works even if Xtime blocks loading. Replace it when the export is updated.</p>
+          <Bookmarklet src="/brand/xtime-export.js" label="⬇ Xtime list to CSV (backup)" copyLabel="Copy the console version" />
+        </details>
       </Card>
       <Card title="2. Use it">
         <ol className="bm-steps">

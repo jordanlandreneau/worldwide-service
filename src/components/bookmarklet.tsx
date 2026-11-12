@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 
 // A link people drag to their bookmarks bar. React won't render javascript: links, so it's set after load.
-export function Bookmarklet({ src, label }: { src: string; label: string }) {
+export function Bookmarklet({ src, label, copyLabel = "Can't use bookmarks? Copy the console version" }: { src: string; label: string; copyLabel?: string }) {
   const ref = useRef<HTMLAnchorElement>(null);
   const [code, setCode] = useState("");
   useEffect(() => {
@@ -17,8 +17,8 @@ export function Bookmarklet({ src, label }: { src: string; label: string }) {
       <a ref={ref} className="bm-link" onClick={(e) => e.preventDefault()} draggable title="Drag me to your bookmarks bar">{label}</a>
       {code && (
         <details className="bm-console">
-          <summary>Can&apos;t use bookmarks? Copy the console version</summary>
-          <p>In the Xtime tab, press F12 (Cmd+Option+J on a Mac), click Console, paste this and press Enter.</p>
+          <summary>{copyLabel}</summary>
+          <p>For a bookmark: right-click the bookmarks bar → Add page, type <code>javascript:</code> in the URL box and paste right after it. For the console: in the Xtime tab press Ctrl+Shift+J (Cmd+Option+J on a Mac), type <code>allow pasting</code> the first time, then paste and press Enter.</p>
           <button type="button" className="x-btn" onClick={() => navigator.clipboard.writeText(code)}>Copy</button>
         </details>
       )}
