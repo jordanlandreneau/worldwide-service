@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LiveSync } from "@/components/follow-live";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, BarChart3, Inbox, Building2, History, ListOrdered, Timer, UserCog, BookOpen, CalendarClock, CalendarPlus, Car, CarFront, CircleHelp, ClipboardCheck, ClipboardList, Gauge, GraduationCap, Info, KeyRound, Library, LogOut, Megaphone, Menu, MessageSquare, MessagesSquare, PanelLeftClose, PanelLeftOpen, Phone, PhoneCall, ScrollText, SlidersHorizontal, Store, Tags, Trophy, Upload, UserCheck, Users, UsersRound, Send, ChevronDown } from "lucide-react";
+import { Activity, BarChart3, Inbox, Building2, History, ListOrdered, Timer, UserCog, BookOpen, CalendarClock, CalendarPlus, Car, CarFront, CircleHelp, ClipboardCheck, ClipboardList, Gauge, GraduationCap, Info, KeyRound, Library, LogOut, Megaphone, Menu, MessageSquare, MessagesSquare, PanelLeftClose, PanelLeftOpen, Phone, PhoneCall, ScrollText, SlidersHorizontal, Store, Tags, Trophy, Upload, UserCheck, Users, UsersRound, Send, ChevronDown, Download } from "lucide-react";
 import { Clocks, TopSearch } from "@/components/top-tools";
 import type { Role } from "@/lib/access";
 
@@ -21,6 +21,7 @@ const GROUPS: { label: string; items: { label: string; href: string; icon: typeo
   { label: "More", items: [
     { label: "Reference Library", href: "/service/glossary", icon: Library, min: "agent" },
     { label: "Appointment Report", href: "/reports/appointments", icon: BarChart3, min: "manager" },
+    { label: "Xtime list export", href: "/tools/xtime", icon: Download, min: "agent" },
     { label: "Request a change", href: "/requests", icon: MessageSquare, min: "dealership", not: "agent" },
   ] },
   { label: "Admin", items: [
