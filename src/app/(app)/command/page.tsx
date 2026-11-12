@@ -4,13 +4,13 @@ import { AlarmClock, BarChart3, CalendarDays, Check, CheckCheck, ClipboardList, 
 import { ActionButton, Field, InlineForm, ModalForm } from "@/components/action-form";
 import { StorePicker } from "@/components/store-picker";
 import { Card, Table } from "@/components/ui";
-import { addStat, updateStat, deleteCampaign, deleteList, deleteStat, saveCampaign, setListTask, toggleWave, uploadList } from "@/lib/command";
+import { addStat, updateStat, saveCallEdit, deleteCampaign, deleteList, deleteStat, saveCampaign, setListTask, toggleWave, uploadList } from "@/lib/command";
 import { assignmentsFor, serviceAgents, type Agent } from "@/lib/assignments";
 import { progressFor } from "@/lib/list-work";
 import { db, fetchAll } from "@/lib/data";
 import { atLeast } from "@/lib/access";
 import { localParts, localToUtc, requireScoped, showLocal } from "@/lib/scope";
-import { storeCalls } from "@/lib/calls";
+import { callEdits, type CallEdit, storeCalls } from "@/lib/calls";
 
 export const metadata = { title: "Command Center · Worldwide Service" };
 
@@ -406,12 +406,18 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
     const start = localToUtc(fromDay, "00:00", tz);
     const end = new Date(localToUtc(toDay, "23:59", tz).getTime() + 59_000);
     const direction = dir === "out" ? "Outgoing" : dir === "in" ? "Incoming" : undefined;
-    const { calls: all, lines, error, capped } = await storeCalls(store.id, start, end, { direction });
+    const { calls: raw, lines, error, capped } = await storeCalls(store.id, start, end, { direction });
+    // Managers' corrections (connected or not, agent, disposition, notes, hidden) layered over JustCall's data.
+    const edits = await callEdits(store.id, raw.map((c) => c.id));
+    const all = raw.map((c) => { const e = edits.get(c.id); return e ? { ...c, connected: e.connected ?? c.connected, agent: e.agent ?? c.agent, disposition: e.disposition ?? c.disposition, notes: e.notes ?? c.notes, hidden: e.hidden, edited: e } : { ...c, hidden: false, edited: null as CallEdit | null }; });
     const agentsOn = [...new Set(all.map((c) => c.agent).filter(Boolean) as string[])].sort();
-    const shown = all.filter((c) => (!agentPick || c.agent === agentPick) && (result === "connected" ? c.connected : result === "missed" ? !c.connected : result === "recorded" ? c.hasRecording : true));
-    const connectedN = shown.filter((c) => c.connected).length;
-    const talk = shown.filter((c) => c.connected).reduce((a, c) => a + c.talk, 0);
-    const outN = shown.filter((c) => /out/i.test(c.direction)).length;
+    // Counted: every call except hidden ones (for the stats). Listed: connected calls unless another result is picked.
+    const counted = all.filter((c) => !c.hidden && (!agentPick || c.agent === agentPick));
+    const view = result || "connected";
+    const shown = view === "hidden" ? all.filter((c) => c.hidden) : counted.filter((c) => (view === "connected" ? c.connected : view === "missed" ? !c.connected : view === "recorded" ? c.hasRecording : true));
+    const connectedN = counted.filter((c) => c.connected).length;
+    const talk = counted.filter((c) => c.connected).reduce((a, c) => a + c.talk, 0);
+    const outN = counted.filter((c) => /out/i.test(c.direction)).length;
     const PER = 50;
     const pages = Math.max(1, Math.ceil(shown.length / PER));
     const current = Math.min(pages, Math.max(1, Number(pageParam) || 1));
@@ -426,7 +432,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
           <label>To <input className="x-input" type="date" name="to" defaultValue={toDay} /></label>
           <label>Direction <select className="x-input" name="dir" defaultValue={dir}><option value="">All calls</option><option value="out">Outbound</option><option value="in">Inbound</option></select></label>
           <label>Agent <select className="x-input" name="agent" defaultValue={agentPick}><option value="">Everyone</option>{agentsOn.map((a) => <option key={a} value={a}>{a}</option>)}</select></label>
-          <label>Result <select className="x-input" name="result" defaultValue={result}><option value="">All</option><option value="connected">Connected</option><option value="missed">Didn&apos;t connect</option><option value="recorded">Has a recording</option></select></label>
+          <label>Show <select className="x-input" name="result" defaultValue={view}><option value="connected">Connected calls</option><option value="all">All calls</option><option value="missed">Didn&apos;t connect (voicemail, no answer)</option><option value="recorded">Has a recording</option>{staff && <option value="hidden">Hidden calls</option>}</select></label>
           <button className="x-btn">Apply</button>
         </form>
         {!lines.length ? (
@@ -435,16 +441,16 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
           <>
             {error && <p role="alert" className="text-sm" style={{ color: "#b42318" }}>{error}</p>}
             <div className="cc-stats">
-              <StatCard label="Calls" icon={<PhoneCall size={18} aria-hidden />} value={shown.length} note={`${outN.toLocaleString()} outbound · ${(shown.length - outN).toLocaleString()} inbound`} tone="slate" bar={100} />
-              <StatCard label="Connection rate" icon={<Signal size={18} aria-hidden />} value={pct(connectedN, shown.length)} unit="%" note={`${connectedN.toLocaleString()} reached the customer`} tone="amber" bar={pct(connectedN, shown.length)} />
+              <StatCard label="Calls" icon={<PhoneCall size={18} aria-hidden />} value={counted.length} note={`${outN.toLocaleString()} outbound · ${(counted.length - outN).toLocaleString()} inbound`} tone="slate" bar={100} />
+              <StatCard label="Connection rate" icon={<Signal size={18} aria-hidden />} value={pct(connectedN, counted.length)} unit="%" note={`${connectedN.toLocaleString()} reached the customer`} tone="amber" bar={pct(connectedN, counted.length)} />
               <StatCard label="Avg talk time" icon={<Clock size={18} aria-hidden />} value={connectedN ? Math.round(talk / connectedN) : 0} unit=" sec" note={connectedN ? `${mmss(Math.round(talk / connectedN))} per connected call` : "No connected calls"} tone="blue" bar={100} />
-              <StatCard label="Recorded" icon={<Headphones size={18} aria-hidden />} value={shown.filter((c) => c.hasRecording).length} note="Calls you can listen to" tone="violet" bar={pct(shown.filter((c) => c.hasRecording).length, shown.length)} />
+              <StatCard label="Recorded" icon={<Headphones size={18} aria-hidden />} value={counted.filter((c) => c.connected && c.hasRecording).length} note="Connected calls you can listen to" tone="violet" bar={pct(counted.filter((c) => c.connected && c.hasRecording).length, connectedN)} />
             </div>
             <Card title="Calls" note={`From JustCall, on ${lines.map((l) => `(${l.slice(0, 3)}) ${l.slice(3, 6)}-${l.slice(6)}`).join(", ")}. Times are store time. A call counts as connected when the customer talked for 10 seconds or more.${capped ? " Showing the most recent 500 calls per line; narrow the dates to see older ones." : ""}`}>
-              {!shown.length ? <p className="text-sm text-ink-muted">No calls in these dates.</p> : (
+              {!shown.length ? <p className="text-sm text-ink-muted">{view === "connected" ? "No connected calls in these dates." : "No calls here."}</p> : (
                 <div className="cc-table-scroll">
                   <table className="cc-ctable cc-calls">
-                    <thead><tr><th>When</th><th>Agent</th><th>Customer</th><th>Result</th><th className="num">Talk</th><th>Disposition</th><th>Recording</th></tr></thead>
+                    <thead><tr><th>When</th><th>Agent</th><th>Customer</th><th>Result</th><th className="num">Talk</th><th>Disposition</th><th>Recording</th>{staff && <th />}</tr></thead>
                     <tbody>
                       {shown.slice((current - 1) * PER, current * PER).map((c) => (
                         <tr key={c.id}>
@@ -455,6 +461,18 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
                           <td className="num">{c.talk ? mmss(c.talk) : "—"}</td>
                           <td>{c.disposition ?? "—"}{c.notes && <small style={{ display: "block" }}>{c.notes}</small>}</td>
                           <td>{c.hasRecording ? <span className="cc-rec"><audio controls preload="none" src={`/api/calls/recording?d=${store.id}&id=${c.id}`} /><a href={`/api/calls/recording?d=${store.id}&id=${c.id}&download=1`} className="text-accent">Download</a></span> : <span className="text-ink-muted">—</span>}</td>
+                          {staff && (
+                            <td>
+                              <ModalForm button="Edit" title="Edit this call" note="Changes only show on this site; JustCall isn't changed." submit="Save" action={saveCallEdit.bind(null, store.id, c.id)}>
+                                <Field label="Result"><select className="x-input" name="connected" defaultValue={c.edited?.connected === true ? "yes" : c.edited?.connected === false ? "no" : "auto"}><option value="auto">Go by talk time ({c.talk}s)</option><option value="yes">Connected</option><option value="no">Didn&apos;t connect</option></select></Field>
+                                <Field label="Agent"><input className="x-input" name="agent" defaultValue={c.edited?.agent ?? ""} placeholder={c.agent ?? ""} /></Field>
+                                <Field label="Disposition"><input className="x-input" name="disposition" defaultValue={c.edited?.disposition ?? ""} placeholder={c.disposition ?? ""} /></Field>
+                                <Field label="Notes"><textarea className="x-input" name="notes" defaultValue={c.edited?.notes ?? ""} style={{ height: 80, padding: 10 }} /></Field>
+                                <label style={{ display: "flex", gap: 8, fontSize: 14 }}><input type="checkbox" name="hidden" defaultChecked={c.hidden} />Hide this call (not counted in the numbers)</label>
+                              </ModalForm>
+                              {c.edited && <small style={{ display: "block" }}>Edited by {c.edited.edited_by}</small>}
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>

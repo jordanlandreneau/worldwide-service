@@ -292,3 +292,19 @@ export async function deleteList(storeId: string, id: string) {
   await db().from("outbound_lists").delete().eq("id", id).eq("dealership_id", storeId);
   refresh();
 }
+
+// Managers and admins correct a JustCall call on the Call Recordings tab: connected or not, agent, disposition, notes, or hide it.
+export async function saveCallEdit(storeId: string, callId: number, _: Result, f: FormData): Promise<Result> {
+  const user = await staff(storeId);
+  if (!user || !Number.isSafeInteger(callId) || callId <= 0) return { error: "You don't have access to this." };
+  const c = String(f.get("connected") ?? "auto");
+  const { error } = await db().from("call_edits").upsert({
+    call_id: callId, dealership_id: storeId,
+    connected: c === "yes" ? true : c === "no" ? false : null,
+    agent: text(f, "agent", 120), disposition: text(f, "disposition", 200), notes: text(f, "notes", 2000),
+    hidden: f.get("hidden") === "on", edited_by: user.email, updated_at: new Date().toISOString(),
+  });
+  if (error) return { error: "Couldn't save this call." };
+  refresh();
+  return { ok: true };
+}

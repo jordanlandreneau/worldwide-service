@@ -1,4 +1,5 @@
 import "server-only";
+import { unstable_cache } from "next/cache";
 import { db } from "@/lib/data";
 import { e164, justcall, lineKey } from "@/lib/justcall";
 
@@ -40,7 +41,7 @@ function toCall(c: any): Call {
 const stamp = (d: Date) => d.toISOString().slice(0, 19).replace("T", " ");
 
 // Calls on a store's lines between two dates, newest first. Reads up to `maxPages` pages of 100 per line.
-export async function storeCalls(storeId: string, from: Date, to: Date, opts: { direction?: string; maxPages?: number } = {}): Promise<{ calls: Call[]; lines: string[]; error?: string; capped?: boolean }> {
+async function readCalls(storeId: string, from: Date, to: Date, opts: { direction?: string; maxPages?: number } = {}): Promise<{ calls: Call[]; lines: string[]; error?: string; capped?: boolean }> {
   const lines = await storeLines(storeId);
   if (!lines.length) return { calls: [], lines };
   // JustCall refuses an end time in the future.
@@ -69,6 +70,7 @@ export async function storeCalls(storeId: string, from: Date, to: Date, opts: { 
           res = await ask(tries[k]);
         }
         if (!res.ok) {
+          if (res.status === 429) throw new Error("JustCall is busy (too many requests across the company). Showing what came back; refresh in a minute for the rest.");
           if (!why) why = (await res.text().catch(() => "")).slice(0, 300);
           throw new Error(res.status === 401 || res.status === 403 ? "JustCall refused the request. Check the JustCall API key in Vercel." : `JustCall said ${res.status}: ${why}`);
         }
@@ -96,4 +98,30 @@ export async function callRecording(callId: string, allowedLines: Set<string>) {
   if (!c || !allowedLines.has(lineKey(c.justcall_number))) return null;
   const url = String(c.call_info?.recording || c.call_info?.recording_child || "");
   return /^https:\/\//i.test(url) ? url : null;
+}
+
+// The same store and dates aren't asked of JustCall again for 2 minutes: JustCall's request limit is shared company-wide.
+const cached = unstable_cache(
+  async (storeId: string, fromIso: string, toIso: string, direction: string) => {
+    const r = await readCalls(storeId, new Date(fromIso), new Date(toIso), { direction: direction || undefined });
+    // An incomplete answer (JustCall busy) isn't kept, so the next view tries again.
+    if (r.error) throw Object.assign(new Error("partial"), { partial: r });
+    return r;
+  },
+  ["store-calls-v1"], { revalidate: 120 },
+);
+export async function storeCalls(storeId: string, from: Date, to: Date, opts: { direction?: string } = {}) {
+  // Round the end to the minute so repeat views share the cache.
+  const end = new Date(Math.floor(Math.min(to.getTime(), Date.now()) / 120_000) * 120_000);
+  let out: Awaited<ReturnType<typeof readCalls>>;
+  try { out = await cached(storeId, from.toISOString(), end.toISOString(), opts.direction ?? ""); }
+  catch (e: any) { out = e?.partial ?? { calls: [], lines: [], error: "Couldn't reach JustCall." }; }
+  return { ...out, calls: out.calls.map((c) => ({ ...c })) };
+}
+
+export type CallEdit = { call_id: number; connected: boolean | null; agent: string | null; disposition: string | null; notes: string | null; hidden: boolean; edited_by: string | null; updated_at: string };
+export async function callEdits(storeId: string, ids: number[]): Promise<Map<number, CallEdit>> {
+  if (!ids.length) return new Map();
+  const { data } = await db().from("call_edits").select("*").eq("dealership_id", storeId).in("call_id", ids.slice(0, 2000));
+  return new Map(((data ?? []) as CallEdit[]).map((e) => [Number(e.call_id), e]));
 }
