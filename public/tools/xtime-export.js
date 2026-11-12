@@ -37,17 +37,45 @@
     if (!recs.length) break;
   }
   store.pageSize = keep; store.loadPage(1);
-  // Friendly columns first, then everything else Xtime sent.
-  const pick = (r, re) => { const k = Object.keys(r).find((x) => re.test(x)); return k ? r[k] : ""; };
-  const phones = (r) => Object.keys(r).filter((k) => /phone|number/i.test(k) && /\d{7,}/.test(String(r[k]).replace(/\D/g, ""))).map((k) => String(r[k]));
-  const keys = []; for (const r of rows) for (const k of Object.keys(r)) if (!keys.includes(k)) keys.push(k);
-  const head = ["First name", "Last name", "Vehicle", "Phone 1", "Phone 2", "Phone 3", "Email", "Call program", "Agent", "Work status", "Last modified", ...keys];
-  const lines = rows.map((r) => { const ph = [...new Set(phones(r))]; return [pick(r, /first.?name/i), pick(r, /last.?name/i), pick(r, /vehicle|year.?make|model/i), ph[0] || "", ph[1] || "", ph[2] || "", pick(r, /e.?mail/i), pick(r, /program|campaign/i) || listName, pick(r, /agent|assign/i), pick(r, /work.?status|status/i), pick(r, /modif|updated/i), ...keys.map((k) => r[k] ?? "")]; });
+  // Clean up: one row per customer (duplicates merged), names in normal case, phones formatted,
+  // bad phone numbers dropped, and customers with no phone left out (they can't be called).
+  const pick = (r, re) => { const k = Object.keys(r).find((x) => re.test(x)); return k ? String(r[k] ?? "").trim() : ""; };
+  const digits = (v) => { let d = String(v ?? "").replace(/\D/g, ""); if (d.length === 11 && d[0] === "1") d = d.slice(1); return d.length === 10 && !/^(\d)\1{9}$/.test(d) && !/^[01]/.test(d) ? d : ""; };
+  const fmt = (d) => `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+  const nice = (v) => String(v || "").trim().replace(/\s+/g, " ").toLowerCase().replace(/(^|[\s\-'’.])([a-z])/g, (m, a, b) => a + b.toUpperCase()).replace(/\b(Ii|Iii|Iv)\b/g, (x) => x.toUpperCase()).replace(/\bMc([a-z])/g, (m, c) => "Mc" + c.toUpperCase());
+  const phonesOf = (r) => [...new Set(Object.keys(r).filter((k) => /phone|number|mobile|cell/i.test(k)).map((k) => digits(r[k])).filter(Boolean))];
+  const people = [];
+  const byPhone = new Map(), byName = new Map();
+  let dupes = 0, noPhone = 0;
+  for (const r of rows) {
+    const first = nice(pick(r, /first.?name/i)), last = nice(pick(r, /last.?name/i));
+    const ph = phonesOf(r);
+    if (!ph.length) { noPhone++; continue; }
+    const vehicle = pick(r, /vehicle|year.?make|model/i).replace(/\s+/g, " ");
+    const email = pick(r, /e.?mail/i).toLowerCase();
+    const nameKey = `${first}|${last}`.toLowerCase();
+    // Same customer if any phone matches, or the same full name with no phone conflict.
+    let p = ph.map((d) => byPhone.get(d)).find(Boolean) || (first && last ? byName.get(nameKey) : null);
+    if (p) {
+      dupes++;
+      p.times++;
+      ph.forEach((d) => { if (!p.phones.includes(d)) p.phones.push(d); });
+      if (vehicle && !p.vehicles.includes(vehicle)) p.vehicles.push(vehicle);
+      if (!p.email && email) p.email = email;
+    } else {
+      p = { first, last, phones: [...ph], vehicles: vehicle ? [vehicle] : [], email, program: pick(r, /program|campaign/i) || listName, agent: pick(r, /agent|assign/i), status: pick(r, /work.?status|status/i), modified: pick(r, /modif|updated/i), times: 1 };
+      people.push(p);
+    }
+    p.phones.forEach((d) => byPhone.set(d, p));
+    if (first && last) byName.set(nameKey, p);
+  }
+  const head = ["First name", "Last name", "Phone 1", "Phone 2", "Phone 3", "Email", "Vehicle(s)", "Call program", "Agent", "Work status", "Last modified", "Times on Xtime list"];
+  const lines = people.map((p) => [p.first, p.last, p.phones[0] ? fmt(p.phones[0]) : "", p.phones[1] ? fmt(p.phones[1]) : "", p.phones[2] ? fmt(p.phones[2]) : "", p.email, p.vehicles.join("; "), p.program, p.agent, p.status, p.modified, p.times]);
   const esc = (v) => { const s = String(v ?? ""); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const csv = "﻿" + [head, ...lines].map((l) => l.map(esc).join(",")).join("\r\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
   a.download = `${listName.replace(/[^\w -]+/g, "").trim() || "xtime-list"} - ${new Date().toISOString().slice(0, 10)}.csv`;
   document.body.appendChild(a); a.click(); a.remove();
-  done(`Downloaded ${rows.length.toLocaleString()} customers from "${listName}".`);
+  done(`Downloaded ${people.length.toLocaleString()} customers from "${listName}" (Xtime had ${rows.length.toLocaleString()}: ${dupes.toLocaleString()} duplicates merged, ${noPhone.toLocaleString()} with no phone left out).`);
 })().catch((e) => alert("Xtime export didn't work: " + (e && e.message ? e.message : e)));
