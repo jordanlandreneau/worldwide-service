@@ -191,6 +191,47 @@ export async function updateStat(storeId: string, id: string, _: Result, f: Form
   return { ok: true };
 }
 
+// Managers and admins type the totals they want straight on Progress Analytics. The difference from
+// what's recorded is saved as one adjustment entry (it can be negative), so it shows and can be undone
+// in the Analytics Breakdown. Scope: one campaign or all campaigns, over the chosen dates.
+export async function setTotals(storeId: string, campaignId: string, from: string, to: string, _: Result, f: FormData): Promise<Result> {
+  const user = await staff(storeId);
+  if (!user) return { error: "Only managers and admins can edit the numbers." };
+  if (campaignId && (!UUID.test(campaignId) || !(await campaignInStore(storeId, campaignId)))) return { error: "That campaign isn't on this store." };
+  if ((from && !DATE.test(from)) || (to && !DATE.test(to))) return { error: "Pick valid dates." };
+  const want = { calls: Number(f.get("calls_made") ?? 0), connected: Number(f.get("calls_connected") ?? 0), appts: Number(f.get("appointments_set") ?? 0) };
+  if (![want.calls, want.connected, want.appts].every((n) => Number.isInteger(n) && n >= 0 && n <= 1000000)) return { error: "Use whole numbers, 0 or more." };
+  if (want.connected > want.calls) return { error: "Connected calls can't be more than outbound calls." };
+  const client = db();
+  let q = client.from("campaign_stats").select("calls_made,calls_connected,appointments_set").eq("dealership_id", storeId).limit(20000);
+  if (campaignId) q = q.eq("campaign_id", campaignId);
+  if (from) q = q.gte("stat_date", from);
+  if (to) q = q.lte("stat_date", to);
+  let a = client.from("appointments").select("created_at").eq("dealership_id", storeId).neq("status", "cancelled").limit(20000);
+  if (campaignId) a = a.eq("campaign_id", campaignId);
+  const [{ data: rows, error }, { data: appts }] = await Promise.all([q, a]);
+  if (error) return { error: "Couldn't read the current numbers." };
+  const dayOf = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const site = ((appts ?? []) as { created_at: string }[]).map((r) => dayOf(r.created_at)).filter((d) => (!from || d >= from) && (!to || d <= to)).length;
+  const have = { calls: 0, connected: 0, appts: site };
+  for (const r of (rows ?? []) as any[]) { have.calls += r.calls_made; have.connected += r.calls_connected ?? 0; have.appts += r.appointments_set; }
+  const delta = { calls: want.calls - have.calls, connected: want.connected - have.connected, appts: want.appts - have.appts };
+  if (!delta.calls && !delta.connected && !delta.appts) return { ok: true };
+  const now = dayOf(new Date().toISOString());
+  let date = to && to < now ? to : now;
+  if (from && date < from) date = from;
+  const why = text(f, "notes", 500);
+  const { data: made, error: e2 } = await client.from("campaign_stats").insert({
+    campaign_id: campaignId || null, dealership_id: storeId, stat_date: date, adjustment: true,
+    calls_made: delta.calls, calls_connected: delta.connected, appointments_set: delta.appts,
+    notes: `Adjusted on Progress Analytics${from || to ? ` (${from || "start"} to ${to || "today"})` : ""}${why ? ` — ${why}` : ""}`, entered_by: user.email,
+  }).select("id").single();
+  if (e2) return { error: "Couldn't save. The database may need the latest update." };
+  await client.from("edit_log").insert({ user_email: user.email, table_name: "campaign_stats", row_id: made?.id ?? null, action: "adjust analytics totals" });
+  refresh();
+  return { ok: true };
+}
+
 export async function deleteStat(storeId: string, id: string) {
   const user = await staff(storeId);
   if (!user || !UUID.test(id)) return;

@@ -9,13 +9,13 @@ export function Field({ label, children }: { label: string; children: ReactNode 
   return <label style={fieldStyle}><span className="type-label text-ink-title">{label}</span>{children}</label>;
 }
 
-export function ModalForm({ button, title, note, action, submit = "Save", children }: { button: string; title: string; note?: string; action: Action; submit?: string; children: ReactNode }) {
+export function ModalForm({ button, title, note, action, submit = "Save", primary, children }: { button: string; title: string; note?: string; action: Action; submit?: string; primary?: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [state, formAction, pending] = useActionState(action, {});
   useEffect(() => { if (state.ok) setOpen(false); }, [state]);
   return (
     <>
-      <button type="button" className="x-btn" onClick={() => setOpen(true)}>{button}</button>
+      <button type="button" className={primary ? "x-btn x-btn-primary" : "x-btn"} onClick={() => setOpen(true)}>{button}</button>
       {open && (
         <div role="dialog" aria-modal="true" aria-label={title} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
           <form action={formAction} className="box-border rounded-card border border-border bg-surface p-card" style={{ width: "min(480px, 100%)", maxHeight: "90vh", overflow: "auto" }}>

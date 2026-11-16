@@ -4,7 +4,7 @@ import { AlarmClock, BarChart3, CalendarDays, Check, CheckCheck, ClipboardList, 
 import { ActionButton, Field, InlineForm, ModalForm } from "@/components/action-form";
 import { StorePicker } from "@/components/store-picker";
 import { Card, Table } from "@/components/ui";
-import { addStat, updateStat, saveCallEdit, deleteCampaign, deleteList, deleteStat, saveCampaign, setListTask, toggleWave, uploadList } from "@/lib/command";
+import { addStat, setTotals, updateStat, saveCallEdit, deleteCampaign, deleteList, deleteStat, saveCampaign, setListTask, toggleWave, uploadList } from "@/lib/command";
 import { assignmentsFor, serviceAgents, type Agent } from "@/lib/assignments";
 import { progressFor } from "@/lib/list-work";
 import { db, fetchAll } from "@/lib/data";
@@ -18,7 +18,7 @@ type Campaign = {
   id: string; category: string; name: string; description: string | null; cadence: string | null; list_ref: string | null;
   launch_date: string | null; wave1_done: boolean; wave2_done: boolean; script: string | null; info: string | null; sort_order: number; due_at: string | null; assigned_to: string | null;
 };
-type Stat = { id: string; campaign_id: string; stat_date: string; calls_made: number; calls_connected: number; appointments_set: number; notes: string | null; entered_by: string };
+type Stat = { id: string; campaign_id: string | null; adjustment?: boolean; stat_date: string; calls_made: number; calls_connected: number; appointments_set: number; notes: string | null; entered_by: string };
 type List = { id: string; campaign_id: string | null; file_name: string; row_count: number; note: string | null; uploaded_by: string; uploaded_at: string; due_at: string | null; assigned_to: string | null };
 
 const TABS = [["matrix", "Category Matrix", Layers], ["analytics", "Progress Analytics", BarChart3], ["breakdown", "Analytics Breakdown", ClipboardList], ["lists", "Outbound Lists", FileSpreadsheet], ["calls", "Call Recordings", Headphones]] as const;
@@ -36,6 +36,22 @@ function StatCard({ label, icon, value, of, unit, note, tone, bar }: { label: st
       <p>{note}</p>
       <div className="cc-bar"><i style={{ width: `${Math.min(100, Math.max(0, bar))}%` }} /></div>
     </div>
+  );
+}
+
+// Managers and admins set the totals right on Progress Analytics.
+function TotalsEditor({ storeId, campaign, from, to, calls, connected, appts, button, primary }: { storeId: string; campaign: { id: string; name: string } | null; from: string; to: string; calls: number; connected: number; appts: number; button: string; primary?: boolean }) {
+  return (
+    <ModalForm primary={primary} button={button} title={`Edit the numbers · ${campaign ? campaign.name : "All campaigns"}`} submit="Save numbers"
+      note={`These are the totals for ${campaign ? campaign.name : "all campaigns"}, ${from || to ? `${from ? day(from) : "the start"} to ${to ? day(to) : "today"}` : "all time"}. Type the right numbers and save. The difference is saved as one adjustment you can see or delete in Analytics Breakdown.`}
+      action={setTotals.bind(null, storeId, campaign?.id ?? "", from, to)}>
+      <div className="cc-form-grid">
+        <Field label="Outbound calls"><input className="x-input" type="number" name="calls_made" min={0} step={1} required defaultValue={calls} /></Field>
+        <Field label="Connected calls (reached the customer)"><input className="x-input" type="number" name="calls_connected" min={0} step={1} required defaultValue={connected} /></Field>
+        <Field label="Appointments"><input className="x-input" type="number" name="appointments_set" min={0} step={1} required defaultValue={appts} /></Field>
+      </div>
+      <Field label="Reason (optional)"><input className="x-input" name="notes" placeholder="e.g. Calls from JustCall report" /></Field>
+    </ModalForm>
   );
 }
 
@@ -119,7 +135,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
   const client = db();
   const [{ data: c1 }, { data: s1 }, { data: l1 }, agents, assigned] = await Promise.all([
     client.from("campaigns").select("id,category,name,description,cadence,list_ref,launch_date,wave1_done,wave2_done,script,info,sort_order,due_at,assigned_to").eq("dealership_id", store.id).order("category").order("sort_order").order("created_at"),
-    client.from("campaign_stats").select("id,campaign_id,stat_date,calls_made,calls_connected,appointments_set,notes,entered_by").eq("dealership_id", store.id).order("stat_date", { ascending: false }).order("created_at", { ascending: false }).limit(2000),
+    client.from("campaign_stats").select("id,campaign_id,stat_date,calls_made,calls_connected,appointments_set,notes,entered_by,adjustment").eq("dealership_id", store.id).order("stat_date", { ascending: false }).order("created_at", { ascending: false }).limit(2000),
     client.from("outbound_lists").select("id,campaign_id,file_name,row_count,note,uploaded_by,uploaded_at,due_at,assigned_to").eq("dealership_id", store.id).order("uploaded_at", { ascending: false }).limit(200),
     worldwide ? serviceAgents() : Promise.resolve([] as Agent[]),
     worldwide ? assignmentsFor(store.id) : Promise.resolve([]),
@@ -268,7 +284,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
     type Tally = { calls: number; connected: number; entered: number; site: number; last: string | null };
     const per = new Map<string, Tally>();
     const tally = (id: string) => { let t = per.get(id); if (!t) { t = { calls: 0, connected: 0, entered: 0, site: 0, last: null }; per.set(id, t); } return t; };
-    for (const s of inRange) { const t = tally(s.campaign_id); t.calls += s.calls_made; t.connected += s.calls_connected ?? 0; t.entered += s.appointments_set; if (!t.last || s.stat_date > t.last) t.last = s.stat_date; }
+    for (const s of inRange) { const t = tally(s.campaign_id ?? ""); t.calls += s.calls_made; t.connected += s.calls_connected ?? 0; t.entered += s.appointments_set; if (!t.last || s.stat_date > t.last) t.last = s.stat_date; }
     for (const a of setInRange) { if (!a.campaign_id) continue; const t = tally(a.campaign_id); t.site += 1; if (!t.last || a.day > t.last) t.last = a.day; }
     const listTotals = new Map<string, { files: number; rows: number; worked: number }>();
     for (const l of lists) { if (!l.campaign_id) continue; const t = listTotals.get(l.campaign_id) ?? { files: 0, rows: 0, worked: 0 }; t.files += 1; t.rows += l.row_count; t.worked += listDone.get(l.id) ?? 0; listTotals.set(l.campaign_id, t); }
@@ -285,6 +301,7 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
     const rows = campaigns.map((c) => ({ c, t: per.get(c.id) ?? { calls: 0, connected: 0, entered: 0, site: 0, last: null }, l: listTotals.get(c.id) ?? { files: 0, rows: 0, worked: 0 } }))
       .sort((x, y) => (y.t.entered + y.t.site) - (x.t.entered + x.t.site) || y.t.calls - x.t.calls);
     const unlinked = setInRange.filter((a) => !a.campaign_id).length;
+    const general = per.get("") ?? (unlinked ? { calls: 0, connected: 0, entered: 0, site: 0, last: null } : null);
     const top = Math.max(1, ...rows.map((r) => r.t.calls));
 
     // Day by day for the chosen campaign.
@@ -303,11 +320,14 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
           <label>To <input className="x-input" type="date" name="to" defaultValue={to} /></label>
           <button className="x-btn">Apply</button>
           {(from || to || chosen) && <Link className="x-btn" href={href({})} style={{ display: "inline-flex", alignItems: "center" }}>Clear</Link>}
-          {staff && <Link className="x-btn x-btn-primary" href={`/command?d=${store.id}&tab=breakdown`} style={{ display: "inline-flex", alignItems: "center", marginLeft: "auto" }}>Edit the numbers</Link>}
+          {staff && <span style={{ marginLeft: "auto", display: "inline-flex", gap: 8, alignItems: "center" }}>
+            <Link className="x-btn" href={`/command?d=${store.id}&tab=breakdown`} style={{ display: "inline-flex", alignItems: "center" }}>Daily entries</Link>
+            <TotalsEditor primary button="Edit the numbers" storeId={store.id} campaign={chosen} from={from} to={to} calls={calls} connected={connected} appts={appts} />
+          </span>}
         </form>
         <div className="cc-stats">
           <StatCard label="Outbound calls" icon={<PhoneCall size={18} aria-hidden />} value={calls} note={`${chosen ? chosen.name : "All campaigns"} · ${from || to ? "chosen dates" : "all time"}`} tone="slate" bar={100} />
-          <StatCard label="Connection rate" icon={<Signal size={18} aria-hidden />} value={pct(connected, calls)} unit="%" note={calls ? `${connected.toLocaleString()} of ${calls.toLocaleString()} calls reached the customer` : "Add connected calls in Analytics Breakdown"} tone="amber" bar={pct(connected, calls)} />
+          <StatCard label="Connection rate" icon={<Signal size={18} aria-hidden />} value={pct(connected, calls)} unit="%" note={calls ? `${connected.toLocaleString()} of ${calls.toLocaleString()} calls reached the customer` : staff ? "Use Edit the numbers to add calls" : "No calls entered yet"} tone="amber" bar={pct(connected, calls)} />
           <StatCard label="Appointments" icon={<CalendarDays size={18} aria-hidden />} value={appts} note={calls ? `${pct(appts, calls)}% of calls set an appointment` : "All appointments set"} tone="green" bar={pct(appts, calls)} />
           <StatCard label="Last 7 days" icon={<Clock size={18} aria-hidden />} value={recent.reduce((a, s) => a + s.calls_made, 0)} note={`${recentAppts} appointments`} tone="blue" bar={100} />
           {chosen
@@ -324,10 +344,10 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
           </Card>
         ) : (
           <Card title="By campaign" note={`Calls come from the Analytics Breakdown. Appointments are those entered there plus those set from the campaign on the site.${unlinked ? ` ${unlinked} appointments set on the site weren't tied to a campaign.` : ""}`}>
-            {!campaigns.length ? <p className="text-sm text-ink-muted">No campaigns yet.</p> : (
+            {!campaigns.length && !general ? <p className="text-sm text-ink-muted">No campaigns yet.</p> : (
               <div className="cc-table-scroll">
                 <table className="cc-ctable">
-                  <thead><tr><th>Campaign</th><th className="num">Calls</th><th className="num">Connected</th><th className="num">Conn. rate</th><th className="num">Entered</th><th className="num">On site</th><th className="num">Total</th><th>Conversion</th><th className="num">Worked / customers</th><th>Last activity</th><th>Waves</th></tr></thead>
+                  <thead><tr><th>Campaign</th><th className="num">Calls</th><th className="num">Connected</th><th className="num">Conn. rate</th><th className="num">Entered</th><th className="num">On site</th><th className="num">Total</th><th>Conversion</th><th className="num">Worked / customers</th><th>Last activity</th><th>Waves</th>{staff && <th />}</tr></thead>
                   <tbody>
                     {rows.map(({ c, t, l }) => {
                       const tot = t.entered + t.site;
@@ -344,11 +364,19 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
                           <td className="num">{l.rows ? `${l.worked.toLocaleString()} / ${l.rows.toLocaleString()}` : "—"}</td>
                           <td>{t.last ? day(t.last) : "—"}</td>
                           <td><span className="cc-pill" data-on={c.wave1_done}>W1</span> <span className="cc-pill" data-on={c.wave2_done} data-wave="2">W2</span></td>
+                          {staff && <td><TotalsEditor button="Edit" storeId={store.id} campaign={{ id: c.id, name: c.name }} from={from} to={to} calls={t.calls} connected={t.connected} appts={tot} /></td>}
                         </tr>
                       );
                     })}
+                    {general && (
+                      <tr>
+                        <td><strong>Not tied to a campaign</strong><small>Edited on this page for all campaigns</small></td>
+                        <td className="num">{general.calls.toLocaleString()}</td><td className="num">{general.connected.toLocaleString()}</td><td className="num">{general.calls ? `${pct(general.connected, general.calls)}%` : "—"}</td>
+                        <td className="num">{general.entered}</td><td className="num">{unlinked}</td><td className="num"><strong>{general.entered + unlinked}</strong></td><td /><td /><td>{general.last ? day(general.last) : "—"}</td><td />{staff && <td />}
+                      </tr>
+                    )}
                   </tbody>
-                  <tfoot><tr><td>All campaigns</td><td className="num">{rows.reduce((a, r) => a + r.t.calls, 0).toLocaleString()}</td><td className="num">{rows.reduce((a, r) => a + r.t.connected, 0).toLocaleString()}</td><td className="num">{pct(rows.reduce((a, r) => a + r.t.connected, 0), rows.reduce((a, r) => a + r.t.calls, 0))}%</td><td className="num">{rows.reduce((a, r) => a + r.t.entered, 0)}</td><td className="num">{rows.reduce((a, r) => a + r.t.site, 0)}</td><td className="num"><strong>{rows.reduce((a, r) => a + r.t.entered + r.t.site, 0)}</strong></td><td /><td /><td /><td /></tr></tfoot>
+                  <tfoot><tr><td>All campaigns</td><td className="num">{calls.toLocaleString()}</td><td className="num">{connected.toLocaleString()}</td><td className="num">{pct(connected, calls)}%</td><td className="num">{scopedStats.reduce((a, s) => a + s.appointments_set, 0)}</td><td className="num">{scopedSet.length}</td><td className="num"><strong>{appts}</strong></td><td /><td /><td /><td />{staff && <td />}</tr></tfoot>
                 </table>
               </div>
             )}
@@ -388,8 +416,8 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
             head={staff ? ["Date", "Campaign", "Calls made", "Connected", "Conn. rate", "Appointments set", "Notes", "Entered by", ""] : ["Date", "Campaign", "Calls made", "Connected", "Conn. rate", "Appointments set", "Notes"]}
             empty="No entries yet."
             rows={stats.map((s) => [
-              day(s.stat_date), names.get(s.campaign_id) ?? "—", s.calls_made, s.calls_connected ?? 0, s.calls_made ? `${pct(s.calls_connected ?? 0, s.calls_made)}%` : "—", s.appointments_set, s.notes ?? "—",
-              ...(staff ? [s.entered_by, <span key="x" className="x-filters"><ModalForm button="Edit" title="Edit entry" action={updateStat.bind(null, store.id, s.id)}>{statFields(s)}</ModalForm><ActionButton label="Delete" confirm="Delete this entry?" action={deleteStat.bind(null, store.id, s.id)} /></span>] : []),
+              day(s.stat_date), s.campaign_id ? names.get(s.campaign_id) ?? "—" : "All campaigns", s.calls_made, s.calls_connected ?? 0, s.calls_made ? `${pct(s.calls_connected ?? 0, s.calls_made)}%` : "—", s.appointments_set, s.notes ?? "—",
+              ...(staff ? [s.entered_by, <span key="x" className="x-filters">{s.adjustment ? <em className="cc-pill" data-on="true">Adjustment</em> : <ModalForm button="Edit" title="Edit entry" action={updateStat.bind(null, store.id, s.id)}>{statFields(s)}</ModalForm>}<ActionButton label="Delete" confirm="Delete this entry?" action={deleteStat.bind(null, store.id, s.id)} /></span>] : []),
             ])}
           />
         </Card>
