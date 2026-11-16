@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="b" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#1636FF"/><stop offset="1" stop-color="#7A90FF"/></linearGradient>
+    <mask id="slot" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+      <rect width="64" height="64" fill="#fff"/>
+      <rect x="29.2" y="2" width="5.6" height="14" rx="1.2" fill="#000"/>
+    </mask>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#070C2E"/>
+  <path fill-rule="evenodd" fill="url(#b)" d="M47.49 27.26 L52.46 27.28 L52.46 36.72 L47.49 36.74 L46.30 39.61 L49.81 43.13 L43.13 49.81 L39.61 46.30 L36.74 47.49 L36.72 52.46 L27.28 52.46 L27.26 47.49 L24.39 46.30 L20.87 49.81 L14.19 43.13 L17.70 39.61 L16.51 36.74 L11.54 36.72 L11.54 27.28 L16.51 27.26 L17.70 24.39 L14.19 20.87 L20.87 14.19 L24.39 17.70 L27.26 16.51 L27.28 11.54 L36.72 11.54 L36.74 16.51 L39.61 17.70 L43.13 14.19 L49.81 20.87 L46.30 24.39Z M39.5 32 A7.5 7.5 0 1 0 24.5 32 A7.5 7.5 0 1 0 39.5 32Z"/>
+  <g transform="rotate(45 32 32)" mask="url(#slot)">
+    <circle cx="32" cy="14.5" r="9.6" fill="#070C2E"/><rect x="27.2" y="18" width="9.6" height="40" rx="4.8" fill="#070C2E"/>
+    <circle cx="32" cy="14.5" r="7.6" fill="#fff"/><rect x="29.2" y="18" width="5.6" height="38" rx="2.8" fill="#fff"/>
+  </g>
+  <circle cx="51" cy="51" r="3.6" fill="#3BE08E"/>
+</svg>
