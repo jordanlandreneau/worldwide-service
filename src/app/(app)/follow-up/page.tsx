@@ -11,11 +11,12 @@ import { acknowledge, addMember, bulkAddMembers, deleteChat, markRead, removeMem
 import { CHANNELS, channelReady } from "@/lib/follow-send";
 import { googleAccount, googleSpaceMembers, googleSpaces, googleUserConfigured, teamsMembers, teamsAccount, teamsConfigured } from "@/lib/follow-providers";
 import { DesktopAlerts } from "@/components/follow-live";
+import { JumpTo } from "@/components/follow-jump";
 
 export const metadata = { title: "Follow-ups · Worldwide Service" };
 
 type Channel = keyof typeof CHANNELS;
-type Params = { show?: string; teams?: string; google?: string; added?: string; view?: string; channel?: string; chat?: string; tab?: string; q?: string; msg?: string; reply?: string; mention?: string };
+type Params = { show?: string; teams?: string; google?: string; added?: string; view?: string; channel?: string; chat?: string; tab?: string; q?: string; msg?: string; reply?: string; mention?: string; find?: string; at?: string; mscope?: string };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ICON: Record<Channel, string> = { whatsapp: "💬", sms: "📱", slack: "🔔", email: "✉️", teams: "🟣", google_chat: "🗨️" };
 const DAY = 24 * 3600 * 1000;
@@ -28,6 +29,22 @@ const ago = (iso: string | null) => {
   if (m < 60) return `${Math.max(m, 1)}m ago`;
   if (m < 1440) return `${Math.round(m / 60)}h ago`;
   return `${Math.round(m / 1440)}d ago`;
+};
+
+// Search words: up to 5, matched anywhere in the message text or the sender's name.
+const words = (s?: string) => (s ?? "").slice(0, 100).replace(/[,()"%_\\*]/g, " ").trim().split(/\s+/).filter(Boolean).slice(0, 5);
+const reEsc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function Mark({ text, terms }: { text: string; terms: string[] }) {
+  if (!text || !terms.length) return <>{text}</>;
+  const parts = text.split(new RegExp(`(${terms.map(reEsc).join("|")})`, "gi"));
+  return <>{parts.map((p, i) => (i % 2 ? <mark key={i} className="fu-mark">{p}</mark> : p))}</>;
+}
+// A slice of a long message centred on the first match.
+const snippet = (text: string, terms: string[], len = 170) => {
+  const flat = (text ?? "").replace(/\s+/g, " ");
+  const at = terms.length ? Math.min(...terms.map((w) => { const i = flat.toLowerCase().indexOf(w.toLowerCase()); return i < 0 ? Infinity : i; })) : 0;
+  const start = Number.isFinite(at) && at > 60 ? at - 50 : 0;
+  return `${start ? "…" : ""}${flat.slice(start, start + len)}${flat.length > start + len ? "…" : ""}`;
 };
 
 // Pictures on a message, shown small; click to open full size.
@@ -162,7 +179,8 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
             <form className="fu-search">
               <input type="hidden" name="channel" value={channel} />
               <MessageSquareText size={15} aria-hidden />
-              <input name="msg" defaultValue={sp.msg ?? ""} placeholder="Search all messages…" aria-label="Search all messages" />
+              <input name="msg" defaultValue={sp.msg ?? ""} placeholder="Search messages or who sent them…" aria-label="Search messages" />
+              {sp.mscope === "here" && <input type="hidden" name="mscope" value="here" />}
             </form>
             {manager && (
               <ModalForm button="+ Add dealership chat" title="New chat" note="Add a store's follow-up chat. The id comes from the chat app." action={saveChat.bind(null, null)} submit="Add chat">
@@ -191,21 +209,34 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   }
 
   async function MessageResults() {
-    const term = (sp.msg ?? "").trim().slice(0, 100).replace(/[%_\\]/g, "\\$&");
-    const { data } = await client.from("follow_messages").select("id,chat_id,body,direction,sender_name,created_at").ilike("body", `%${term}%`).order("created_at", { ascending: false }).limit(60);
+    const terms = words(sp.msg);
+    const here = sp.mscope === "here";
+    let q = client.from("follow_messages").select("id,chat_id,body,direction,sender_name,sender,created_at,attachments");
+    for (const w of terms) q = q.or(`body.ilike.%${w}%,sender_name.ilike.%${w}%,sender.ilike.%${w}%`);
+    if (here) q = q.in("chat_id", chats.filter((c: any) => c.channel === channel).map((c: any) => c.id));
+    const { data } = terms.length ? await q.order("created_at", { ascending: false }).limit(100) : { data: [] };
     const rows = (data ?? []) as any[];
     const byId = new Map(chats.map((c: any) => [c.id, c]));
     return (
       <ul className="fu-items">
-        <li className="fu-muted" style={{ fontSize: 12 }}>{rows.length} {rows.length === 1 ? "message" : "messages"} found · <Link href={link({})}>clear search</Link></li>
+        <li className="fu-search-meta">
+          <span>{rows.length === 100 ? "Newest 100 matches" : `${rows.length} ${rows.length === 1 ? "match" : "matches"}`}</span>
+          <span className="fu-scope">
+            <Link href={link({ msg: sp.msg, chat: sp.chat, at: sp.at })} className={!here ? "active" : ""}>All channels</Link>
+            <Link href={link({ msg: sp.msg, mscope: "here", chat: sp.chat, at: sp.at })} className={here ? "active" : ""}>{CHANNELS[channel]} only</Link>
+          </span>
+          <Link href={link({ chat: sp.chat })}>Clear</Link>
+        </li>
+        {rows.length === 0 && <li className="fu-muted fu-pad">No messages match. Try fewer or shorter words.</li>}
         {rows.map((m) => {
           const c: any = byId.get(m.chat_id);
+          const who = m.direction === "inbound" ? m.sender_name || m.sender || "Store" : m.sender_name ? `${m.sender_name} (WWBDC)` : "WWBDC";
           return (
             <li key={m.id}>
-              <Link href={link({ chat: m.chat_id, channel: c?.channel, msg: sp.msg })} className="fu-item">
-                <span className="fu-item-top"><strong>{c?.name ?? "Chat"}</strong><em className="fu-badge">{m.direction === "inbound" ? "Reply" : "Sent"}</em></span>
-                <span className="fu-snippet">{m.body.slice(0, 140)}</span>
-                <span className="fu-item-sub">{day(m.created_at)} {time(m.created_at)}</span>
+              <Link href={`${link({ chat: m.chat_id, channel: c?.channel, msg: sp.msg, mscope: sp.mscope, at: m.id })}#m-${m.id}`} className={`fu-item${sp.at === m.id ? " active" : ""}`}>
+                <span className="fu-item-top"><strong>{c ? `${ICON[c.channel as Channel] ?? ""} ${c.name}` : "Chat"}</strong><em className={`fu-badge${m.direction === "inbound" ? " pending" : ""}`}>{m.direction === "inbound" ? "Store" : "Sent"}</em></span>
+                <span className="fu-item-sub"><Mark text={who} terms={terms} /> · {day(m.created_at)} {time(m.created_at)}</span>
+                <span className="fu-snippet">{m.body ? <Mark text={snippet(m.body, terms)} terms={terms} /> : m.attachments?.length ? "📎 Picture" : ""}</span>
               </Link>
             </li>
           );
@@ -248,8 +279,8 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
           </div>
         </header>
         <div className="fu-tabs" role="tablist">
-          <Link role="tab" aria-selected={tab === "chat"} href={link({ chat: chat.id, q: sp.q })}><MessagesSquare size={14} /> Chat &amp; Dispatch</Link>
-          <Link role="tab" aria-selected={tab === "roster"} href={link({ chat: chat.id, tab: "roster", q: sp.q })}><Users size={14} /> Roster</Link>
+          <Link role="tab" aria-selected={tab === "chat"} href={link({ chat: chat.id, q: sp.q, msg: sp.msg, mscope: sp.mscope })}><MessagesSquare size={14} /> Chat &amp; Dispatch</Link>
+          <Link role="tab" aria-selected={tab === "roster"} href={link({ chat: chat.id, tab: "roster", q: sp.q, msg: sp.msg, mscope: sp.mscope })}><Users size={14} /> Roster</Link>
         </div>
         {tab === "chat" ? <Thread chat={chat} people={people} /> : <Roster chat={chat} people={people} />}
       </>
@@ -257,14 +288,39 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   }
 
   async function Thread({ chat, people }: { chat: any; people: any[] }) {
-    const { data } = await client.from("follow_messages").select("id,direction,body,sender_name,sender,kind,status,error,read,created_at,reply_to,handled_kind,handled_name,handled_at,attachments").eq("chat_id", chat.id).order("created_at", { ascending: false }).limit(200);
-    const all = ((data ?? []) as any[]).reverse();
+    const cols = "id,direction,body,sender_name,sender,kind,status,error,read,created_at,reply_to,handled_kind,handled_name,handled_at,attachments";
+    const onlyOpen = sp.show === "open";
+    // Three ways to show the chat: the newest messages, every message matching a search
+    // in this chat (all history), or the conversation around one message picked from search.
+    const findTerms = onlyOpen ? [] : words(sp.find);
+    let mode: "latest" | "find" | "at" = "latest";
+    let all: any[] = [];
+    let hitDay = "";
+    if (findTerms.length) {
+      mode = "find";
+      let q = client.from("follow_messages").select(cols).eq("chat_id", chat.id);
+      for (const w of findTerms) q = q.or(`body.ilike.%${w}%,sender_name.ilike.%${w}%,sender.ilike.%${w}%`);
+      all = (((await q.order("created_at", { ascending: false }).limit(200)).data ?? []) as any[]).reverse();
+    } else if (!onlyOpen && sp.at && UUID.test(sp.at)) {
+      const { data: hit } = await client.from("follow_messages").select("created_at").eq("id", sp.at).eq("chat_id", chat.id).maybeSingle();
+      if (hit) {
+        mode = "at";
+        hitDay = day(hit.created_at);
+        const [before, after] = await Promise.all([
+          client.from("follow_messages").select(cols).eq("chat_id", chat.id).lte("created_at", hit.created_at).order("created_at", { ascending: false }).limit(80),
+          client.from("follow_messages").select(cols).eq("chat_id", chat.id).gt("created_at", hit.created_at).order("created_at", { ascending: true }).limit(80),
+        ]);
+        all = [...((before.data ?? []) as any[]).reverse(), ...((after.data ?? []) as any[])];
+      }
+    }
+    if (mode === "latest") all = ((((await client.from("follow_messages").select(cols).eq("chat_id", chat.id).order("created_at", { ascending: false }).limit(200)).data) ?? []) as any[]).reverse();
+    const hl = mode === "find" ? findTerms : mode === "at" ? words(sp.msg) : [];
     const byId = new Map(all.map((m) => [m.id, m]));
     // Our replies sit under the store message they answer, not in the main stream.
     const answers = new Map<string, any[]>();
     for (const m of all) if (m.direction === "outbound" && m.reply_to && byId.has(m.reply_to)) answers.set(m.reply_to, [...(answers.get(m.reply_to) ?? []), m]);
     const open = all.filter((m) => m.direction === "inbound" && !m.handled_kind);
-    const onlyOpen = sp.show === "open";
+    const openCount = mode === "latest" ? open.length : unread.get(chat.id) ?? 0;
     const stream = onlyOpen ? open : all.filter((m) => !(m.direction === "outbound" && m.reply_to && byId.has(m.reply_to)));
     const pending = all.filter((m) => m.direction === "inbound" && !m.read).length;
     const advisors = people.filter((p) => !/wwbdc|worldwide|service bdc|management/i.test(`${p.name} ${p.email ?? ""}`)).map((p) => p.name as string);
@@ -277,18 +333,27 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
     const recipients = chat.channel === "email" ? people.filter((p) => p.email).length : people.length;
     const quoted = sp.reply ? byId.get(sp.reply) : undefined;
     const who = (m: any) => (m.direction === "outbound" ? "WWBDC" : m.sender_name || m.sender || "Store");
-    const here = { chat: chat.id, q: sp.q, show: sp.show };
+    const here = { chat: chat.id, q: sp.q, show: sp.show, msg: sp.msg, mscope: sp.mscope };
     let lastDay = "";
     return (
       <>
         <div className="fu-thread-tools">
-          <Link href={link({ ...here, show: undefined })} className={!onlyOpen ? "active" : ""}>All messages</Link>
-          <Link href={link({ ...here, show: "open" })} className={onlyOpen ? "active" : ""}>Needs reply{open.length ? <b>{open.length}</b> : null}</Link>
+          <Link href={link({ ...here, show: undefined })} className={!onlyOpen && mode === "latest" ? "active" : ""}>All messages</Link>
+          <Link href={link({ ...here, show: "open" })} className={onlyOpen ? "active" : ""}>Needs reply{openCount ? <b>{openCount}</b> : null}</Link>
+          <form className="fu-search fu-find">
+            {Object.entries({ channel, chat: chat.id, q: sp.q, msg: sp.msg, mscope: sp.mscope }).map(([k, v]) => v ? <input key={k} type="hidden" name={k} value={v} /> : null)}
+            <Search size={13} aria-hidden />
+            <input name="find" defaultValue={mode === "find" ? sp.find : ""} placeholder="Search this chat…" aria-label="Search this chat" />
+          </form>
           <span className="fu-legend"><i className="in" /> Store <i className="reply" /> Our reply <i className="out" /> Our message <i className="dispatch" /> Dispatch</span>
-          {pending > 0 && <form action={markRead.bind(null, chat.id)} className="fu-markread"><button>Mark {pending} as read</button></form>}
+          {mode === "latest" && pending > 0 && <form action={markRead.bind(null, chat.id)} className="fu-markread"><button>Mark {pending} as read</button></form>}
         </div>
+        {mode === "find" && <div className="fu-found">{all.length === 200 ? "Newest 200" : all.length} {all.length === 1 ? "message" : "messages"} in this chat match “{findTerms.join(" ")}”. Click <b>Show in chat</b> to see one in context. <Link href={link(here)}>Clear search</Link></div>}
+        {mode === "at" && <div className="fu-found">Showing the conversation around a message from {hitDay}. <Link href={link(here)}>Back to latest</Link></div>}
+        {sp.at && mode === "at" && <JumpTo id={`m-${sp.at}`} />}
         <div className="fu-thread-wrap"><div>
-          {stream.length === 0 && <p className="fu-muted fu-pad">{onlyOpen ? "Nothing waiting. Every store message has been answered or acknowledged." : "No messages yet. Sent follow-ups and the store's replies show here."}</p>}
+          {mode === "find" && all.length === 0 && <p className="fu-muted fu-pad">Nothing in this chat matches. Try fewer or shorter words.</p>}
+          {mode !== "find" && stream.length === 0 && <p className="fu-muted fu-pad">{onlyOpen ? "Nothing waiting. Every store message has been answered or acknowledged." : "No messages yet. Sent follow-ups and the store's replies show here."}</p>}
           <ol className="fu-thread">
             {stream.map((m) => {
               const d = day(m.created_at);
@@ -297,16 +362,17 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
               const label = m.direction === "inbound" ? who(m) : m.kind === "follow_up" ? "Follow-up dispatch" : m.reply_to ? "Our reply" : "Our message";
               const replies = answers.get(m.id) ?? [];
               return (
-                <li key={m.id} className="fu-row">
+                <li key={m.id} id={`m-${m.id}`} className="fu-row">
                   {sep && <div className="fu-day">{sep}</div>}
                   {onlyOpen && <div className="fu-day">{day(m.created_at)}</div>}
-                  <div className={`fu-bubble ${kind}${m.direction === "inbound" && !m.handled_kind ? " open" : ""}${m.direction === "inbound" && !m.read ? " unread" : ""}${m.status === "failed" ? " failed" : ""}`}>
+                  <div className={`fu-bubble ${kind}${sp.at === m.id && mode === "at" ? " fu-hit" : ""}${m.direction === "inbound" && !m.handled_kind ? " open" : ""}${m.direction === "inbound" && !m.read ? " unread" : ""}${m.status === "failed" ? " failed" : ""}`}>
                     <span className="fu-who">{label}</span>
                     {m.direction === "inbound" && m.sender && m.sender_name && <span className="fu-mono fu-from">{m.sender}</span>}
                     {m.direction === "outbound" && m.reply_to && byId.get(m.reply_to) && <span className="fu-quote">↪ {who(byId.get(m.reply_to))}: {byId.get(m.reply_to).body.slice(0, 80)}</span>}
-                    {m.body && <p>{m.body}</p>}
+                    {m.body && <p><Mark text={m.body} terms={hl} /></p>}
                     <Pictures list={m.attachments} />
                     <span className="fu-time">{time(m.created_at)}{m.direction === "outbound" && m.sender_name ? ` · ${m.sender_name}` : ""}</span>
+                    {mode === "find" && <Link className="fu-incontext" href={`${link({ ...here, at: m.id })}#m-${m.id}`}>Show in chat →</Link>}
                     {m.status === "failed" && <span className="fu-notsent">Not sent{m.error ? `: ${m.error}` : ""}</span>}
                   </div>
                   {m.direction === "inbound" && (
@@ -322,9 +388,9 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
                   {replies.length > 0 && (
                     <ul className="fu-answers">
                       {replies.map((r) => (
-                        <li key={r.id} className={`fu-bubble outbound reply${r.status === "failed" ? " failed" : ""}`}>
+                        <li key={r.id} id={`m-${r.id}`} className={`fu-bubble outbound reply${sp.at === r.id && mode === "at" ? " fu-hit" : ""}${r.status === "failed" ? " failed" : ""}`}>
                           <span className="fu-who">Our reply</span>
-                          {r.body && <p>{r.body}</p>}
+                          {r.body && <p><Mark text={r.body} terms={hl} /></p>}
                           <Pictures list={r.attachments} />
                           <span className="fu-time">{time(r.created_at)}{r.sender_name ? ` · ${r.sender_name}` : ""}</span>
                           {r.status === "failed" && <span className="fu-notsent">Not sent{r.error ? `: ${r.error}` : ""}</span>}
