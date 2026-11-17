@@ -53,7 +53,7 @@ export async function smsSend(chat: SmsChat & { name?: string; justcall_group_id
 }
 
 // Replies in each chat's JustCall group: messages that didn't come from our line.
-export async function smsPull(saveNew: (chatId: string, list: { body: string; sender: string | null; senderName: string | null; externalId: string; at: string; media?: { url: string }[] }[]) => Promise<number>, sinceMs: number) {
+export async function smsPull(saveNew: (chatId: string, list: { body: string; sender: string | null; senderName: string | null; externalId: string; at: string; ours?: boolean; media?: { url: string }[] }[]) => Promise<number>, sinceMs: number) {
   if (!process.env.JUSTCALL_API_KEY || !process.env.JUSTCALL_API_SECRET) return 0;
   const client = db();
   const { data: chats } = await client.from("follow_chats").select("id,dealership_id,justcall_line,justcall_group_id").eq("channel", "sms").eq("active", true).not("justcall_group_id", "is", null);
@@ -80,7 +80,8 @@ export async function smsPull(saveNew: (chatId: string, list: { body: string; se
         const media = raw.flatMap((x: any) => String(typeof x === "object" ? x.url ?? x.media_url ?? "" : x).split(",")).map((u: string) => u.trim()).filter((u: string) => /^https:\/\//.test(u)).map((url: string) => ({ url }));
         return { sender, direction, body, at, id: m.id, media };
       }).filter((m) => (m.body || m.media.length) && m.id && !/out/i.test(m.direction) && m.sender !== line && Date.parse(m.at) >= sinceMs - 60_000)
-        .map((m) => ({ body: m.body, sender: m.sender || null, senderName: names.get(m.sender) ?? null, externalId: `jcg-${m.id}`, at: m.at, media: m.media }));
+        // A group text with no sender number is one sent from our JustCall line (by an agent in JustCall): our side.
+        .map((m) => ({ body: m.body, sender: m.sender || null, senderName: m.sender ? names.get(m.sender) ?? null : "WWBDC (JustCall)", externalId: `jcg-${m.id}`, at: m.at, media: m.media, ours: !m.sender }));
       if (items.length) added += await saveNew(c.id, items);
     } catch { /* next pull */ }
   }

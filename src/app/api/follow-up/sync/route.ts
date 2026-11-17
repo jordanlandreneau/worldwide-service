@@ -3,6 +3,7 @@ import { atLeast, getUser } from "@/lib/access";
 import { db } from "@/lib/data";
 import { pullAll } from "@/lib/follow-sync";
 import { storesForUser } from "@/lib/assignments";
+import { alertsFor, claims, isMine, unclaimed } from "@/lib/follow-notify";
 
 // Called in the background on every page for agents and up: pulls new replies, then returns
 // the store messages that reached the site since the browser last asked (for popups).
@@ -15,13 +16,19 @@ export async function POST(request: NextRequest) {
   const since = body.since && !Number.isNaN(Date.parse(body.since)) ? body.since : null;
   if (!since) return NextResponse.json({ added, now, messages: [] });
   const client = db();
-  const { data } = await client.from("follow_messages").select("id,chat_id,body,sender_name,sender,received_at,created_at")
+  const { data } = await client.from("follow_messages").select("id,chat_id,body,sender_name,sender,received_at,created_at,direction")
     .eq("direction", "inbound").gt("received_at", since).order("received_at").limit(10);
-  const rows = (data ?? []) as any[];
+  const all = (data ?? []) as any[];
+  // Popups are personal: by default a store message pops up only for the agent whose follow-up or
+  // message it answers (or who is @-mentioned). Each person can choose to also see unclaimed ones, or all.
+  const { data: me } = await client.from("app_users").select("follow_alerts").ilike("email", user.email.replace(/[%_\\]/g, "\\$&")).maybeSingle();
+  const scope = alertsFor(user.role, (me as any)?.follow_alerts);
+  const owned = await claims(all);
+  const rows = all.filter((r) => scope === "all" || isMine(owned.get(r.id), user.email) || (scope === "unclaimed" && unclaimed(owned.get(r.id))));
   const ids = [...new Set(rows.map((r) => r.chat_id))];
   const { data: chats } = ids.length ? await client.from("follow_chats").select("id,name,channel").in("id", ids) : { data: [] };
   const chat = new Map(((chats ?? []) as any[]).map((c) => [c.id, c]));
-  const until = rows.length === 10 ? rows.at(-1)!.received_at : now;
+  const until = all.length === 10 ? all.at(-1)!.received_at : now;
   // Site events (a store uploaded a calling sheet, work assigned to you) in the same window.
   const { data: ev } = await client.from("site_events").select("id,kind,dealership_id,user_id,title,body,link,created_by,created_at")
     .gt("created_at", since).lte("created_at", until).order("created_at").limit(20);
@@ -31,10 +38,10 @@ export async function POST(request: NextRequest) {
     events = events.filter((e) => e.user_id || (e.dealership_id && mine.has(e.dealership_id)));
   }
   return NextResponse.json({
-    added: added || rows.length, now: until,
+    added: added || all.length, now: until,
     messages: [
       // Only messages sent in the last 2 hours pop up (history brought in from a chat app stays quiet).
-      ...rows.filter((r) => Date.parse(r.created_at) > Date.now() - 2 * 3600_000).map((r) => ({ id: r.id, at: r.created_at, chatId: r.chat_id, chat: chat.get(r.chat_id)?.name ?? "Chat", channel: chat.get(r.chat_id)?.channel ?? "", from: r.sender_name || r.sender || "Store", body: String(r.body).slice(0, 300) })),
+      ...rows.filter((r) => Date.parse(r.created_at) > Date.now() - 2 * 3600_000).map((r) => ({ id: r.id, at: r.created_at, chatId: r.chat_id, chat: chat.get(r.chat_id)?.name ?? "Chat", channel: chat.get(r.chat_id)?.channel ?? "", from: `${r.sender_name || r.sender || "Store"}${isMine(owned.get(r.id), user.email) ? (owned.get(r.id)!.mentioned.has(user.email.toLowerCase()) ? " · mentioned you" : owned.get(r.id)!.followUp ? ` · re: your follow-up (${owned.get(r.id)!.followUp})` : " · re: your message") : ""}`, body: String(r.body).slice(0, 300), href: `/follow-up?chat=${r.chat_id}&show=open` })),
       ...events.map((e) => ({ id: e.id, at: e.created_at, chatId: "", chat: e.title, channel: "event", from: e.kind === "assigned" ? "Assigned to you" : e.kind === "onboarding" ? "Onboarding form" : "Calling sheet", body: String(e.body ?? "").slice(0, 300), href: e.link || "/command" })),
     ],
   });

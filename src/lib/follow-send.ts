@@ -1,6 +1,6 @@
 import "server-only";
 import { escapeHtml } from "@/lib/mail";
-import { googleChatReady, googleChatSend, googleUserConfigured, teamsConfigured, teamsSend } from "@/lib/follow-providers";
+import { googleChatReady, googleChatSend, googleUserConfigured, slackConfigured, slackSend, teamsConfigured, teamsSend } from "@/lib/follow-providers";
 import { smsSend } from "@/lib/follow-sms";
 import { type Attachment, type Mention, readBytes, shareLink } from "@/lib/follow-media";
 
@@ -23,10 +23,11 @@ export function channelReady(channel: Chat["channel"]) {
   if (channel === "sms") return !!process.env.JUSTCALL_API_KEY && !!process.env.JUSTCALL_API_SECRET;
   if (channel === "teams") return teamsConfigured();
   if (channel === "google_chat") return googleUserConfigured() || googleChatReady();
+  if (channel === "slack") return slackConfigured();
   return false;
 }
 
-export type Extras = { attachments?: Attachment[]; mentions?: Mention[] };
+export type Extras = { attachments?: Attachment[]; mentions?: Mention[]; senderName?: string };
 
 export async function deliver(chat: Chat, members: Member[], text: string, subject: string, senderEmail?: string, extras: Extras = {}): Promise<Sent> {
   try {
@@ -43,6 +44,7 @@ export async function deliver(chat: Chat, members: Member[], text: string, subje
     }
     if (chat.channel === "teams") return await teamsSend(chat.teams_chat_id, text, { pictures: await bytes(), mentions: extras.mentions });
     if (chat.channel === "google_chat") return await googleChatSend(chat.google_chat_space, text, senderEmail, { pictures: await bytes(), mentions: extras.mentions });
+    if (chat.channel === "slack") return await slackSend(chat.slack_channel_id, text, extras.senderName, await bytes());
     return { ok: false, error: `${CHANNELS[chat.channel]} isn't connected to the Service site yet.` };
   } catch {
     return { ok: false, error: `${CHANNELS[chat.channel]} didn't answer. Try again.` };

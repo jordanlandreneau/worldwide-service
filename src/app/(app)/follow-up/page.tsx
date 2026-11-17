@@ -1,25 +1,36 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
-import { AtSign, BarChart3, Building2, LayoutDashboard, LogOut, MessageSquareText, MessagesSquare, Reply, Search, Users } from "lucide-react";
+import { AtSign, BarChart3, Bell, Building2, LayoutDashboard, LogOut, MessageSquareText, MessagesSquare, Reply, Search, Users } from "lucide-react";
 import { ActionButton, Field, ModalForm } from "@/components/action-form";
 import { CopyButton, ThemeToggle } from "@/components/follow-bits";
 import { Composer } from "@/components/follow-composer";
 import { ChatFields } from "@/components/follow-chat-fields";
 import { atLeast, requireUser } from "@/lib/access";
 import { db, fetchAll } from "@/lib/data";
-import { acknowledge, addMember, bulkAddMembers, deleteChat, markRead, removeMember, reopen, saveChat, sendFollowUp, sendReply, setMemberEmail, syncGoogleChat, syncWhatsAppNames } from "@/lib/follow";
+import { acknowledge, addMember, bulkAddMembers, deleteChat, markRead, noReplyNeeded, removeMember, reopen, saveChat, setAlerts, sendFollowUp, sendReply, setMemberEmail, syncGoogleChat, syncWhatsAppNames } from "@/lib/follow";
 import { CHANNELS, channelReady } from "@/lib/follow-send";
-import { googleAccount, googleSpaceMembers, googleSpaces, googleUserConfigured, teamsMembers, teamsAccount, teamsConfigured } from "@/lib/follow-providers";
+import { googleAccount, googleSpaceMembers, googleSpaces, googleUserConfigured, slackChannels, slackConfigured, teamsMembers, teamsAccount, teamsConfigured } from "@/lib/follow-providers";
+import { alertsFor, myNotifications } from "@/lib/follow-notify";
 import { DesktopAlerts } from "@/components/follow-live";
 import { JumpTo } from "@/components/follow-jump";
 
 export const metadata = { title: "Follow-ups · Worldwide Service" };
 
 type Channel = keyof typeof CHANNELS;
-type Params = { show?: string; teams?: string; google?: string; added?: string; view?: string; channel?: string; chat?: string; tab?: string; q?: string; msg?: string; reply?: string; mention?: string; find?: string; at?: string; mscope?: string };
+type Params = { show?: string; teams?: string; google?: string; added?: string; view?: string; channel?: string; chat?: string; tab?: string; q?: string; msg?: string; reply?: string; mention?: string; find?: string; at?: string; mscope?: string; who?: string };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ICON: Record<Channel, string> = { whatsapp: "💬", sms: "📱", slack: "🔔", email: "✉️", teams: "🟣", google_chat: "🗨️" };
 const DAY = 24 * 3600 * 1000;
+// Each dealership gets its own color (the same one on every channel); managers can pick another in the chat's settings.
+const PALETTE = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#ca8a04", "#db2777", "#4f46e5", "#059669", "#b45309", "#0f766e", "#be123c", "#7c3aed", "#65a30d", "#c2410c"];
+const storeKey = (c: any) => c.dealership_id || String(c.name ?? "").split("//")[0].replace(/\b(wwbdc|teams|follow ?up|service|bdc)\b/gi, "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+const colorOf = (c: any): string => {
+  if (c?.color) return c.color;
+  let h = 0;
+  for (const ch of storeKey(c)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+};
+const HANDLED: Record<string, string> = { answered: "✓ Answered", acknowledged: "👍 Acknowledged", void: "🚫 No reply needed" };
 
 const time = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric" });
@@ -66,20 +77,25 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   const theme = (await cookies()).get("fu_theme")?.value === "dark" ? "dark" : "light";
   const roleName = { admin: "Admin", manager: "Manager", agent: "Agent", dealership: "Store" }[user.role];
   const initials = user.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
-  const view = sp.view === "manage" || sp.view === "analytics" ? sp.view : "dashboard";
+  const view = sp.view === "manage" || sp.view === "analytics" || sp.view === "alerts" ? sp.view : "dashboard";
   const client = db();
   // New replies are pulled in the background by <LiveSync />, so the page doesn't wait on the chat apps.
   // Everything the page needs is read at once.
-  const [teams, google, myGoogle, chats, stores, { data: unreadRows }, { data: memberRows }] = await Promise.all([
+  const [teams, google, myGoogle, chats, stores, { data: unreadRows }, { data: memberRows }, { data: meRow }, notes] = await Promise.all([
     teamsConfigured() ? teamsAccount().catch(() => null) : Promise.resolve(null),
     googleUserConfigured() ? googleAccount().catch(() => null) : Promise.resolve(null),
     googleUserConfigured() ? googleAccount(user.email).catch(() => null) : Promise.resolve(null),
-    fetchAll<any>("follow_chats", "id,name,channel,dealership_id,active,last_activity,whatsapp_group_id,teams_chat_id,google_chat_space,justcall_line,justcall_group_id,slack_channel_id", "name"),
+    fetchAll<any>("follow_chats", "id,name,channel,dealership_id,active,last_activity,whatsapp_group_id,teams_chat_id,google_chat_space,justcall_line,justcall_group_id,slack_channel_id,color", "name"),
     fetchAll<any>("dealerships", "id,name,active", "name"),
     // "Pending" means store messages nobody has answered or acknowledged yet.
     client.from("follow_messages").select("chat_id").eq("direction", "inbound").is("handled_kind", null).limit(5000),
     client.from("follow_members").select("id,chat_id,name,phone,email,role").order("name").limit(10000),
+    client.from("app_users").select("follow_alerts").ilike("email", user.email.replace(/[%_\\]/g, "\\$&")).maybeSingle(),
+    // Store messages that answer this person's follow-ups (or @-mention them): the Notifications tab.
+    myNotifications(user.email, { unclaimedToo: manager }),
   ]);
+  const alerts = alertsFor(user.role, (meRow as any)?.follow_alerts);
+  const waiting = notes.mine.filter((m: any) => !m.handled_kind);
   const unread = new Map<string, number>();
   for (const r of (unreadRows ?? []) as any[]) unread.set(r.chat_id, (unread.get(r.chat_id) ?? 0) + 1);
   const members = new Map<string, any[]>();
@@ -87,13 +103,15 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   const status = (c: any) => (unread.get(c.id) ? "pending" : c.last_activity && Date.now() - new Date(c.last_activity).getTime() < DAY ? "active" : "inactive");
   const channels = Object.keys(CHANNELS) as Channel[];
   const selected = sp.chat && UUID.test(sp.chat) ? chats.find((c: any) => c.id === sp.chat) : undefined;
-  const channel: Channel = (channels.includes(sp.channel as Channel) ? sp.channel : selected?.channel ?? "whatsapp") as Channel;
-  // The connected Google account's spaces, so a Google Chat chat picks its space from a list.
-  const spaceList = channel === "google_chat" && google && manager ? await googleSpaces().catch(() => []) : [];
+  // All dealerships are one list; a channel is only an optional filter.
+  const chFilter = channels.includes(sp.channel as Channel) ? (sp.channel as Channel) : null;
+  const channel = (chFilter ?? selected?.channel ?? null) as Channel | null;
+  // The connected Google account's spaces and the Slack channels the app is in, for the chat settings lists.
+  const [spaceList, slackList] = manager ? await Promise.all([google ? googleSpaces().catch(() => []) : [], slackConfigured() ? slackChannels().catch(() => []) : []]) : [[], []];
   const activeStores = stores.filter((s: any) => s.active !== false).map((s: any) => ({ id: s.id as string, name: s.name as string }));
   const link = (p: Params) => {
     const q = new URLSearchParams();
-    for (const [k, v] of Object.entries({ view: undefined, channel, ...p })) if (v) q.set(k, v);
+    for (const [k, v] of Object.entries({ view: undefined, channel: chFilter ?? undefined, ...p })) if (v) q.set(k, v);
     return `/follow-up?${q}`;
   };
 
@@ -108,12 +126,16 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
         <nav className="fu-nav" aria-label="Follow-up pages">
           <Link href={link({})} className={view === "dashboard" ? "active" : ""}><LayoutDashboard size={16} /> Dashboard</Link>
           <Link href={link({ view: "manage" })} className={view === "manage" ? "active" : ""}><Building2 size={16} /> Dealership Management</Link>
+          <Link href={link({ view: "alerts" })} className={view === "alerts" ? "active" : ""}><Bell size={16} /> My notifications{waiting.length ? <b className="fu-count">{waiting.length}</b> : null}</Link>
           <Link href={link({ view: "analytics" })} className={view === "analytics" ? "active" : ""}><BarChart3 size={16} /> Analytics</Link>
         </nav>
-        <p className="fu-side-label">Channels</p>
+        <p className="fu-side-label">Channels <small>(filter)</small></p>
         <div className="fu-channels">
+          <Link href={`/follow-up?${new URLSearchParams(view === "dashboard" ? {} : { view })}`} className={!chFilter ? "active" : ""} title="All channels">
+            <span aria-hidden>🗂️</span><span className="fu-ch-name">All channels</span><i className="on" aria-hidden />
+          </Link>
           {channels.map((ch) => (
-            <Link key={ch} href={link({ channel: ch, view: view === "dashboard" ? undefined : view })} className={ch === channel ? "active" : ""} title={CHANNELS[ch]}>
+            <Link key={ch} href={link({ channel: ch, view: view === "dashboard" ? undefined : view })} className={ch === chFilter ? "active" : ""} title={CHANNELS[ch]}>
               <span aria-hidden>{ICON[ch]}</span><span className="fu-ch-name">{CHANNELS[ch]}</span>
               <i className={(ch === "teams" ? !!teams : ch === "google_chat" ? !!google : channelReady(ch)) ? "on" : ""} aria-label={(ch === "teams" ? !!teams : ch === "google_chat" ? !!google : channelReady(ch)) ? "connected" : "not connected"} />
             </Link>
@@ -134,11 +156,16 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
               : <a className="fu-conn-btn" href="/api/public/google-auth-start?mine=1">Send as me ({user.email})</a>)}
             {sp.google && <span className="fu-conn-note">{{ mine: "Your Google account is connected. Your Google Chat replies now show your name.", connected: `Google Chat is connected.${sp.added ? ` Added ${sp.added} space${sp.added === "1" ? "" : "s"} as chats.` : ""}`, failed: "Google didn't accept the sign-in. Check the redirect URI and that the Chat API is on.", expired: "The sign-in took too long. Try again.", cancelled: "Sign-in was cancelled.", denied: "Only managers can connect Google Chat.", missing: "Add the Google OAuth keys in Vercel first." }[sp.google] ?? ""}</span>}
           </div>
-        ) : (
+        ) : channel === "slack" ? (
+          <div className={`fu-conn ${slackConfigured() ? "on" : ""}`}>
+            {slackConfigured() ? <>Slack: connected · the app is in {slackList.length} channel{slackList.length === 1 ? "" : "s"}</> : "Slack: add SLACK_BOT_TOKEN in Vercel to connect"}
+            {slackConfigured() && <span className="fu-conn-note">To add a dealer channel, type <b>/invite @Worldwide Service</b> in it on Slack.</span>}
+          </div>
+        ) : channel ? (
           <div className={`fu-conn ${channelReady(channel) ? "on" : ""}`}>
             {CHANNELS[channel]}: {channelReady(channel) ? "Connected" : "Not connected yet"}
           </div>
-        )}
+        ) : null}
         {channel !== "teams" && teamsConfigured() && manager && !teams && (
           <div className="fu-conn">
             Microsoft Teams: not signed in
@@ -146,6 +173,16 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
           </div>
         )}
         <DesktopAlerts />
+        <form action={setAlerts} className="fu-alert-pref">
+          <label>Popups for store messages
+            <select name="alerts" defaultValue={alerts}>
+              <option value="mine">Only mine (my follow-ups, @me)</option>
+              <option value="unclaimed">Mine + ones nobody sent</option>
+              <option value="all">Every dealership</option>
+            </select>
+          </label>
+          <button>Save</button>
+        </form>
         {manager && <Link className="fu-check" href="/follow-up/check">Check connections</Link>}
         <div className="fu-user">
           <span className="fu-avatar">{initials}</span>
@@ -157,45 +194,46 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
       {view === "dashboard" && <Dashboard />}
       {view === "manage" && <Manage />}
       {view === "analytics" && <Analytics />}
+      {view === "alerts" && <Notifications />}
     </div>
   );
 
   function Dashboard() {
     const needle = (sp.q ?? "").trim().toLowerCase();
     const list = chats
-      .filter((c: any) => c.channel === channel && (!needle || c.name.toLowerCase().includes(needle)))
+      .filter((c: any) => (!chFilter || c.channel === chFilter) && (!needle || c.name.toLowerCase().includes(needle)))
       .sort((a: any, b: any) => (unread.get(b.id) ?? 0) - (unread.get(a.id) ?? 0) || String(b.last_activity ?? "").localeCompare(String(a.last_activity ?? "")));
     return (
       <>
         <section className="fu-list" aria-label="Dealerships">
           <div className="fu-list-head">
             <h1>Dealerships</h1>
-            <p>{list.length} on {CHANNELS[channel]} · click one to open it</p>
+            <p>{list.length} dealership chat{list.length === 1 ? "" : "s"}{chFilter ? ` on ${CHANNELS[chFilter]}` : " on every channel"} · click one to open it</p>
             <form className="fu-search">
-              <input type="hidden" name="channel" value={channel} />
+              {chFilter && <input type="hidden" name="channel" value={chFilter} />}
               <Search size={15} aria-hidden />
               <input name="q" defaultValue={sp.q ?? ""} placeholder="Filter dealerships…" aria-label="Filter dealerships" />
             </form>
             <form className="fu-search">
-              <input type="hidden" name="channel" value={channel} />
+              {chFilter && <input type="hidden" name="channel" value={chFilter} />}
               <MessageSquareText size={15} aria-hidden />
               <input name="msg" defaultValue={sp.msg ?? ""} placeholder="Search messages or who sent them…" aria-label="Search messages" />
               {sp.mscope === "here" && <input type="hidden" name="mscope" value="here" />}
             </form>
             {manager && (
               <ModalForm button="+ Add dealership chat" title="New chat" note="Add a store's follow-up chat. The id comes from the chat app." action={saveChat.bind(null, null)} submit="Add chat">
-                <ChatFields chat={{ channel, active: true }} stores={activeStores} spaces={spaceList} />
+                <ChatFields chat={{ channel: channel ?? "whatsapp", active: true }} stores={activeStores} spaces={spaceList} slackChannels={slackList} />
               </ModalForm>
             )}
           </div>
           {sp.msg?.trim() ? <MessageResults /> : <ul className="fu-items">
-            {list.length === 0 && <li className="fu-muted fu-pad">No {CHANNELS[channel]} chats{needle ? " match" : " yet"}.</li>}
+            {list.length === 0 && <li className="fu-muted fu-pad">No {chFilter ? CHANNELS[chFilter] : "dealership"} chats{needle ? " match" : " yet"}.</li>}
             {list.map((c: any) => {
               const st = status(c);
               return (
                 <li key={c.id}>
-                  <Link href={link({ chat: c.id, q: sp.q })} className={`fu-item${selected?.id === c.id ? " active" : ""}`}>
-                    <span className="fu-item-top"><strong>{c.name}</strong>{unread.get(c.id) ? <b className="fu-count">{unread.get(c.id)}</b> : null}<em className={`fu-badge ${st}`}>{st === "pending" ? "Pending" : st === "active" ? "Active" : "Inactive"}</em></span>
+                  <Link href={link({ chat: c.id, q: sp.q })} className={`fu-item${selected?.id === c.id ? " active" : ""}`} style={{ ["--dc" as string]: colorOf(c) }}>
+                    <span className="fu-item-top"><span className="fu-ch-ico" title={CHANNELS[c.channel as Channel]} aria-label={CHANNELS[c.channel as Channel]}>{ICON[c.channel as Channel]}</span><strong>{c.name}</strong>{unread.get(c.id) ? <b className="fu-count">{unread.get(c.id)}</b> : null}<em className={`fu-badge ${st}`}>{st === "pending" ? "Pending" : st === "active" ? "Active" : "Inactive"}</em></span>
                     <span className="fu-item-sub"><Users size={12} aria-hidden /> {(members.get(c.id) ?? []).length} members · {ago(c.last_activity)}</span>
                   </Link>
                 </li>
@@ -210,10 +248,10 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
 
   async function MessageResults() {
     const terms = words(sp.msg);
-    const here = sp.mscope === "here";
+    const here = sp.mscope === "here" && !!chFilter;
     let q = client.from("follow_messages").select("id,chat_id,body,direction,sender_name,sender,created_at,attachments");
     for (const w of terms) q = q.or(`body.ilike.%${w}%,sender_name.ilike.%${w}%,sender.ilike.%${w}%`);
-    if (here) q = q.in("chat_id", chats.filter((c: any) => c.channel === channel).map((c: any) => c.id));
+    if (here) q = q.in("chat_id", chats.filter((c: any) => c.channel === chFilter).map((c: any) => c.id));
     const { data } = terms.length ? await q.order("created_at", { ascending: false }).limit(100) : { data: [] };
     const rows = (data ?? []) as any[];
     const byId = new Map(chats.map((c: any) => [c.id, c]));
@@ -221,10 +259,10 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
       <ul className="fu-items">
         <li className="fu-search-meta">
           <span>{rows.length === 100 ? "Newest 100 matches" : `${rows.length} ${rows.length === 1 ? "match" : "matches"}`}</span>
-          <span className="fu-scope">
+          {chFilter && <span className="fu-scope">
             <Link href={link({ msg: sp.msg, chat: sp.chat, at: sp.at })} className={!here ? "active" : ""}>All channels</Link>
-            <Link href={link({ msg: sp.msg, mscope: "here", chat: sp.chat, at: sp.at })} className={here ? "active" : ""}>{CHANNELS[channel]} only</Link>
-          </span>
+            <Link href={link({ msg: sp.msg, mscope: "here", chat: sp.chat, at: sp.at })} className={here ? "active" : ""}>{CHANNELS[chFilter]} only</Link>
+          </span>}
           <Link href={link({ chat: sp.chat })}>Clear</Link>
         </li>
         {rows.length === 0 && <li className="fu-muted fu-pad">No messages match. Try fewer or shorter words.</li>}
@@ -233,7 +271,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
           const who = m.direction === "inbound" ? m.sender_name || m.sender || "Store" : m.sender_name ? `${m.sender_name} (WWBDC)` : "WWBDC";
           return (
             <li key={m.id}>
-              <Link href={`${link({ chat: m.chat_id, channel: c?.channel, msg: sp.msg, mscope: sp.mscope, at: m.id })}#m-${m.id}`} className={`fu-item${sp.at === m.id ? " active" : ""}`}>
+              <Link href={`${link({ chat: m.chat_id, msg: sp.msg, mscope: sp.mscope, at: m.id })}#m-${m.id}`} className={`fu-item${sp.at === m.id ? " active" : ""}`} style={{ ["--dc" as string]: c ? colorOf(c) : "transparent" }}>
                 <span className="fu-item-top"><strong>{c ? `${ICON[c.channel as Channel] ?? ""} ${c.name}` : "Chat"}</strong><em className={`fu-badge${m.direction === "inbound" ? " pending" : ""}`}>{m.direction === "inbound" ? "Store" : "Sent"}</em></span>
                 <span className="fu-item-sub"><Mark text={who} terms={terms} /> · {day(m.created_at)} {time(m.created_at)}</span>
                 <span className="fu-snippet">{m.body ? <Mark text={snippet(m.body, terms)} terms={terms} /> : m.attachments?.length ? "📎 Picture" : ""}</span>
@@ -265,14 +303,14 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
       <>
         <header className="fu-detail-head">
           <div>
-            <h2>{chat.name} <em className="fu-pill">{ICON[ch]} {CHANNELS[ch]}</em> <em className={`fu-badge ${status(chat)}`}>{status(chat) === "pending" ? "Pending" : status(chat) === "active" ? "Active" : "Inactive"}</em>{!chat.active && <em className="fu-badge off">Off</em>}</h2>
+            <h2><i className="fu-dot" style={{ background: colorOf(chat) }} aria-hidden />{chat.name} <em className="fu-pill">{ICON[ch]} {CHANNELS[ch]}</em> <em className={`fu-badge ${status(chat)}`}>{status(chat) === "pending" ? "Pending" : status(chat) === "active" ? "Active" : "Inactive"}</em>{!chat.active && <em className="fu-badge off">Off</em>}</h2>
             <p className="fu-mono fu-muted">{ident ? `id: ${ident}` : "No chat id yet"}{store ? <> · <Link href={`/service/info?d=${store.id}`}>{store.name}</Link></> : null}</p>
           </div>
           <div className="fu-head-actions">
             {ident && <CopyButton value={ident} />}
             {manager && (
               <ModalForm button="Settings" title="Chat settings" action={saveChat.bind(null, chat.id)}>
-                <ChatFields chat={chat} stores={stores.filter((s: any) => s.active !== false || s.id === chat.dealership_id)} spaces={spaceList} />
+                <ChatFields chat={{ ...chat, autoColor: colorOf({ ...chat, color: null }) }} stores={stores.filter((s: any) => s.active !== false || s.id === chat.dealership_id)} spaces={spaceList} slackChannels={slackList} />
               </ModalForm>
             )}
             {manager && <ActionButton label="Delete" confirm={`Delete "${chat.name}", its roster and its messages? This can't be undone.`} action={deleteChat.bind(null, chat.id)} />}
@@ -321,7 +359,10 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
     for (const m of all) if (m.direction === "outbound" && m.reply_to && byId.has(m.reply_to)) answers.set(m.reply_to, [...(answers.get(m.reply_to) ?? []), m]);
     const open = all.filter((m) => m.direction === "inbound" && !m.handled_kind);
     const openCount = mode === "latest" ? open.length : unread.get(chat.id) ?? 0;
-    const stream = onlyOpen ? open : all.filter((m) => !(m.direction === "outbound" && m.reply_to && byId.has(m.reply_to)));
+    // "Needs reply" keeps what was handled in the last 3 days (dimmed, with who handled it) under the waiting ones.
+    const doneRecently = all.filter((m) => m.direction === "inbound" && m.handled_kind && m.handled_at && Date.now() - Date.parse(m.handled_at) < 3 * DAY).reverse();
+    const stream = onlyOpen ? [...open, ...doneRecently] : all.filter((m) => !(m.direction === "outbound" && m.reply_to && byId.has(m.reply_to)));
+    const firstDone = onlyOpen ? doneRecently[0]?.id : undefined;
     const pending = all.filter((m) => m.direction === "inbound" && !m.read).length;
     const advisors = people.filter((p) => !/wwbdc|worldwide|service bdc|management/i.test(`${p.name} ${p.email ?? ""}`)).map((p) => p.name as string);
     // @ suggestions: the Roster plus everyone actually in the Teams chat or Google Chat space.
@@ -341,7 +382,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
           <Link href={link({ ...here, show: undefined })} className={!onlyOpen && mode === "latest" ? "active" : ""}>All messages</Link>
           <Link href={link({ ...here, show: "open" })} className={onlyOpen ? "active" : ""}>Needs reply{openCount ? <b>{openCount}</b> : null}</Link>
           <form className="fu-search fu-find">
-            {Object.entries({ channel, chat: chat.id, q: sp.q, msg: sp.msg, mscope: sp.mscope }).map(([k, v]) => v ? <input key={k} type="hidden" name={k} value={v} /> : null)}
+            {Object.entries({ channel: chFilter ?? undefined, chat: chat.id, q: sp.q, msg: sp.msg, mscope: sp.mscope }).map(([k, v]) => v ? <input key={k} type="hidden" name={k} value={v} /> : null)}
             <Search size={13} aria-hidden />
             <input name="find" defaultValue={mode === "find" ? sp.find : ""} placeholder="Search this chat…" aria-label="Search this chat" />
           </form>
@@ -353,19 +394,20 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
         {sp.at && mode === "at" && <JumpTo id={`m-${sp.at}`} />}
         <div className="fu-thread-wrap"><div>
           {mode === "find" && all.length === 0 && <p className="fu-muted fu-pad">Nothing in this chat matches. Try fewer or shorter words.</p>}
-          {mode !== "find" && stream.length === 0 && <p className="fu-muted fu-pad">{onlyOpen ? "Nothing waiting. Every store message has been answered or acknowledged." : "No messages yet. Sent follow-ups and the store's replies show here."}</p>}
+          {mode !== "find" && stream.length === 0 && <p className="fu-muted fu-pad">{onlyOpen ? "Nothing waiting, and nothing handled in the last 3 days." : "No messages yet. Sent follow-ups and the store's replies show here."}</p>}
           <ol className="fu-thread">
             {stream.map((m) => {
               const d = day(m.created_at);
               const sep = !onlyOpen && d !== lastDay ? (lastDay = d) : null;
               const kind = m.direction === "inbound" ? "inbound" : m.kind === "follow_up" ? "outbound dispatch" : m.reply_to ? "outbound reply" : "outbound";
-              const label = m.direction === "inbound" ? who(m) : m.kind === "follow_up" ? "Follow-up dispatch" : m.reply_to ? "Our reply" : "Our message";
+              const label = m.direction === "inbound" ? who(m) : m.kind === "follow_up" ? "Follow-up dispatch" : m.reply_to ? "Our reply" : m.kind === "team" ? `${m.sender_name ?? "Our team"} (in the chat app)` : "Our message";
               const replies = answers.get(m.id) ?? [];
               return (
                 <li key={m.id} id={`m-${m.id}`} className="fu-row">
                   {sep && <div className="fu-day">{sep}</div>}
+                  {onlyOpen && m.id === firstDone && <div className="fu-day fu-done-head">{open.length ? "Handled in the last 3 days" : "Nothing waiting · handled in the last 3 days"}</div>}
                   {onlyOpen && <div className="fu-day">{day(m.created_at)}</div>}
-                  <div className={`fu-bubble ${kind}${sp.at === m.id && mode === "at" ? " fu-hit" : ""}${m.direction === "inbound" && !m.handled_kind ? " open" : ""}${m.direction === "inbound" && !m.read ? " unread" : ""}${m.status === "failed" ? " failed" : ""}`}>
+                  <div className={`fu-bubble ${kind}${onlyOpen && m.handled_kind ? " done" : ""}${sp.at === m.id && mode === "at" ? " fu-hit" : ""}${m.direction === "inbound" && !m.handled_kind ? " open" : ""}${m.direction === "inbound" && !m.read ? " unread" : ""}${m.status === "failed" ? " failed" : ""}`}>
                     <span className="fu-who">{label}</span>
                     {m.direction === "inbound" && m.sender && m.sender_name && <span className="fu-mono fu-from">{m.sender}</span>}
                     {m.direction === "outbound" && m.reply_to && byId.get(m.reply_to) && <span className="fu-quote">↪ {who(byId.get(m.reply_to))}: {byId.get(m.reply_to).body.slice(0, 80)}</span>}
@@ -378,10 +420,11 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
                   {m.direction === "inbound" && (
                     <div className="fu-handled">
                       {m.handled_kind ? (
-                        <span className={`fu-state ${m.handled_kind}`}>{m.handled_kind === "answered" ? "✓ Answered" : "👍 Acknowledged"} by {m.handled_name ?? "BDC"} · {time(m.handled_at)}</span>
+                        <span className={`fu-state ${m.handled_kind}`}>{HANDLED[m.handled_kind] ?? m.handled_kind} by <b>{m.handled_name ?? "BDC"}</b> · {day(m.handled_at) === day(new Date().toISOString()) ? time(m.handled_at) : `${day(m.handled_at)} ${time(m.handled_at)}`}</span>
                       ) : <span className="fu-state open">Needs reply</span>}
                       <Link href={link({ ...here, reply: m.id })}><Reply size={12} /> Reply</Link>
                       {!m.handled_kind && <form action={acknowledge.bind(null, chat.id, m.id)}><button>👍 Acknowledge</button></form>}
+                      {!m.handled_kind && <form action={noReplyNeeded.bind(null, chat.id, m.id)}><button title="Nothing to answer (e.g. “Thanks!”). Records your name.">🚫 No reply needed</button></form>}
                       {m.handled_kind && <form action={reopen.bind(null, chat.id, m.id)}><button>Reopen</button></form>}
                     </div>
                   )}
@@ -474,10 +517,10 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
           return (
             <details key={c.id} className="fu-card">
               <summary>
-                <strong>{c.name}</strong> <em className={`fu-badge ${status(c)}`}>{status(c) === "pending" ? "Pending" : status(c) === "active" ? "Active" : "Inactive"}</em>
+                <i className="fu-dot" style={{ background: colorOf(c) }} aria-hidden /><strong>{c.name}</strong> <em className={`fu-badge ${status(c)}`}>{status(c) === "pending" ? "Pending" : status(c) === "active" ? "Active" : "Inactive"}</em>
                 <span className="fu-muted"> · {people.length} members</span>
                 <span className="fu-pill">{ICON[c.channel as Channel]} {CHANNELS[c.channel as Channel]}</span>
-                <Link className="fu-open" href={link({ chat: c.id, channel: c.channel })}>Open</Link>
+                <Link className="fu-open" href={link({ chat: c.id })}>Open</Link>
               </summary>
               {people.length === 0 ? <p className="fu-muted fu-pad">No members.</p> : (
                 <ul className="fu-people">{people.map((p) => <li key={p.id}><div><strong>{p.name}</strong><span className="fu-mono fu-muted">{p.phone ?? ""}</span></div><span className={p.email ? "" : "fu-muted"}>{p.email ?? ""}</span><span /></li>)}</ul>
@@ -489,7 +532,66 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
     );
   }
 
-  function Analytics() {
+  // Store messages that are this person's to handle: replies to their follow-ups and messages, and @-mentions.
+  function Notifications() {
+    const byId = new Map(chats.map((c: any) => [c.id, c]));
+    const tab = sp.who === "done" ? "done" : sp.who === "loose" && manager ? "loose" : "mine";
+    const done = notes.mine.filter((m: any) => m.handled_kind && m.handled_at && Date.now() - Date.parse(m.handled_at) < 3 * DAY);
+    const list = tab === "loose" ? notes.loose : tab === "done" ? done : waiting;
+    return (
+      <section className="fu-page fu-notes">
+        <h1>My notifications</h1>
+        <p className="fu-muted">Store messages that answer a follow-up or message you sent here (within 3 days), or that @-mention you. Reply, acknowledge, or mark No reply needed. Your name is recorded either way.</p>
+        <div className="fu-thread-tools">
+          <Link href={link({ view: "alerts" })} className={tab === "mine" ? "active" : ""}>Waiting on me{waiting.length ? <b>{waiting.length}</b> : null}</Link>
+          <Link href={link({ view: "alerts", who: "done" })} className={tab === "done" ? "active" : ""}>Handled (last 3 days)</Link>
+          {manager && <Link href={link({ view: "alerts", who: "loose" })} className={tab === "loose" ? "active" : ""}>Nobody&apos;s yet{notes.loose.length ? <b>{notes.loose.length}</b> : null}</Link>}
+        </div>
+        {list.length === 0 && <p className="fu-muted fu-pad">{tab === "mine" ? "Nothing waiting on you. 🎉" : tab === "done" ? "Nothing handled in the last 3 days." : "No unclaimed store messages in the last 14 days."}</p>}
+        <ul className="fu-note-list">
+          {list.map((m: any) => {
+            const c: any = byId.get(m.chat_id);
+            const cl = notes.claims.get(m.id);
+            const why = cl?.mentioned.has(user.email.toLowerCase()) ? "Mentioned you" : cl?.followUp ? `Reply to your follow-up: ${cl.followUp}` : tab === "loose" ? "No one sent a follow-up here in the 3 days before" : "Reply to your message";
+            return (
+              <li key={m.id} className="fu-note" style={{ ["--dc" as string]: c ? colorOf(c) : "#94a3b8" }}>
+                <div className="fu-note-top">
+                  <strong>{c ? <>{ICON[c.channel as Channel]} {c.name}</> : "Chat"}</strong>
+                  <span className="fu-muted">{m.sender_name || m.sender || "Store"} · {day(m.created_at)} {time(m.created_at)}</span>
+                </div>
+                <p className="fu-note-why">{why}</p>
+                {m.body && <p className="fu-note-body">{m.body.slice(0, 600)}</p>}
+                <Pictures list={m.attachments} />
+                <div className="fu-handled">
+                  {m.handled_kind
+                    ? <span className={`fu-state ${m.handled_kind}`}>{HANDLED[m.handled_kind] ?? m.handled_kind} by <b>{m.handled_name ?? "BDC"}</b> · {time(m.handled_at)}</span>
+                    : <span className="fu-state open">Needs reply</span>}
+                  <Link href={`${link({ chat: m.chat_id, at: m.id })}#m-${m.id}`}>Open chat</Link>
+                  {!m.handled_kind && <Link href={link({ chat: m.chat_id, show: "open", reply: m.id })}><Reply size={12} /> Reply</Link>}
+                  {!m.handled_kind && <form action={acknowledge.bind(null, m.chat_id, m.id)}><button>👍 Acknowledge</button></form>}
+                  {!m.handled_kind && <form action={noReplyNeeded.bind(null, m.chat_id, m.id)}><button>🚫 No reply needed</button></form>}
+                  {m.handled_kind && <form action={reopen.bind(null, m.chat_id, m.id)}><button>Reopen</button></form>}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    );
+  }
+
+  async function Analytics() {
+    // Who handled store messages in the last 7 days, and how.
+    const { data: handled } = await client.from("follow_messages").select("handled_name,handled_kind").eq("direction", "inbound").not("handled_kind", "is", null)
+      .gte("handled_at", new Date(Date.now() - 7 * DAY).toISOString()).limit(10000);
+    const byAgent = new Map<string, { answered: number; acknowledged: number; void: number }>();
+    for (const h of (handled ?? []) as any[]) {
+      const k = h.handled_name || "Unknown";
+      const t = byAgent.get(k) ?? { answered: 0, acknowledged: 0, void: 0 };
+      t[h.handled_kind as "answered"] = (t[h.handled_kind as "answered"] ?? 0) + 1;
+      byAgent.set(k, t);
+    }
+    const agentRows = [...byAgent.entries()].sort((a, b) => (b[1].answered + b[1].acknowledged + b[1].void) - (a[1].answered + a[1].acknowledged + a[1].void));
     const total = chats.length;
     const people = (memberRows ?? []).length;
     const counts = { active: 0, pending: 0, inactive: 0 } as Record<string, number>;
@@ -513,6 +615,15 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
               <i><b className={k} style={{ width: `${total ? (counts[k] / total) * 100 : 0}%` }} /></i>
             </div>
           ))}
+        </div>
+        <div className="fu-card fu-pad">
+          <p className="fu-eyebrow">Store messages handled · last 7 days (acknowledged counts as replied)</p>
+          {agentRows.length === 0 ? <p className="fu-muted">Nothing handled in the last 7 days.</p> : (
+            <table className="fu-table">
+              <thead><tr><th>Agent</th><th>Replied</th><th>Acknowledged</th><th>No reply needed</th><th>Total handled</th></tr></thead>
+              <tbody>{agentRows.map(([n, t]) => <tr key={n}><td>{n}</td><td>{t.answered}</td><td>{t.acknowledged}</td><td>{t.void}</td><td><strong>{t.answered + t.acknowledged + t.void}</strong></td></tr>)}</tbody>
+            </table>
+          )}
         </div>
         <div className="fu-card fu-pad">
           <p className="fu-eyebrow">Top dealer chats by roster size</p>

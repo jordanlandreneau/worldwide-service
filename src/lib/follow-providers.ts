@@ -451,6 +451,103 @@ export async function checkConnections(sample: { whatsapp?: string | null; teams
     const spaces = await googleSpaces();
     return { ok: true, detail: `Signed in as ${acct.account}; can see ${spaces.length} spaces` };
   });
+  await run("Slack", async () => {
+    if (!slackConfigured()) return { ok: false, detail: "SLACK_BOT_TOKEN is missing" };
+    const who = await slack("auth.test", {}, true);
+    if (!who.ok) return { ok: false, detail: SLACK_ERRORS[who.error] ?? `Slack said: ${who.error}` };
+    return { ok: true, detail: `Connected to ${who.team} as ${who.user}; in ${(await slackChannels()).length} channels` };
+  });
   out.push({ channel: "Replies (webhook key)", ok: !!process.env.FOLLOW_UP_WEBHOOK_KEY, detail: process.env.FOLLOW_UP_WEBHOOK_KEY ? "FOLLOW_UP_WEBHOOK_KEY is set" : "FOLLOW_UP_WEBHOOK_KEY is missing, so WhatsApp and text replies are refused" });
   return out;
+}
+
+// ---------- Slack (the "Worldwide Service" Slack app, a bot token in SLACK_BOT_TOKEN) ----------
+// The app is invited to each dealer channel (including Slack Connect channels shared with a store).
+// Messages go out under the agent's name; replies are pulled every few seconds like the other chat apps.
+export const slackConfigured = () => !!process.env.SLACK_BOT_TOKEN;
+
+async function slack(method: string, params: Record<string, unknown>, form = false) {
+  const token = process.env.SLACK_BOT_TOKEN;
+  if (!token) throw new Error("SLACK_BOT_TOKEN is missing");
+  const res = form
+    ? await fetch(`https://slack.com/api/${method}?${new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)]))}`, { headers: { Authorization: `Bearer ${token}` } })
+    : await fetch(`https://slack.com/api/${method}`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" }, body: JSON.stringify(params) });
+  return (await res.json().catch(() => ({ ok: false, error: `http_${res.status}` }))) as any;
+}
+
+const SLACK_ERRORS: Record<string, string> = {
+  not_in_channel: "The Worldwide Service app isn't in this Slack channel. In Slack, type /invite @Worldwide Service in the channel.",
+  channel_not_found: "Slack can't find this channel. Check the channel in the chat's settings, and that the app was invited.",
+  invalid_auth: "Slack didn't accept the token. Check SLACK_BOT_TOKEN in Vercel.",
+  missing_scope: "The Slack app is missing a permission. Reinstall it from the manifest.",
+  is_archived: "This Slack channel is archived.",
+};
+
+export async function slackSend(channelId: string | null | undefined, text: string, senderName?: string, pictures: { bytes: ArrayBuffer; type: string; name: string }[] = []): Promise<{ ok: true; externalId?: string } | { ok: false; error: string }> {
+  if (!slackConfigured()) return { ok: false, error: "Slack isn't connected yet: add SLACK_BOT_TOKEN in Vercel." };
+  if (!channelId) return { ok: false, error: "This chat has no Slack channel. Pick it in the chat's settings." };
+  const out = await slack("chat.postMessage", { channel: channelId, text: text || " ", username: senderName ? `${senderName} · WWBDC` : undefined, unfurl_links: false, unfurl_media: false });
+  if (!out.ok) return { ok: false, error: SLACK_ERRORS[out.error] ?? `Slack said: ${out.error}` };
+  // Pictures go up as files in the same conversation.
+  for (const p of pictures.slice(0, 6)) {
+    try {
+      const up = await slack("files.getUploadURLExternal", { filename: p.name, length: p.bytes.byteLength }, true);
+      if (!up.ok) continue;
+      await fetch(up.upload_url, { method: "POST", body: new Blob([p.bytes], { type: p.type }) });
+      await slack("files.completeUploadExternal", { files: [{ id: up.file_id, title: p.name }], channel_id: channelId, thread_ts: undefined });
+    } catch { /* the text still went */ }
+  }
+  return { ok: true, externalId: `sl-${out.ts}` };
+}
+
+// Channels the app is in, for the chat settings dropdown.
+export async function slackChannels(): Promise<{ id: string; name: string }[]> {
+  if (!slackConfigured()) return [];
+  const cached = await getState<{ at: number; list: { id: string; name: string }[] }>("slack_channels");
+  if (cached && Date.now() - cached.at < 5 * 60_000) return cached.list;
+  const list: { id: string; name: string }[] = [];
+  let cursor = "";
+  for (let i = 0; i < 5; i++) {
+    const out = await slack("users.conversations", { types: "public_channel,private_channel", exclude_archived: true, limit: 200, ...(cursor ? { cursor } : {}) }, true);
+    if (!out.ok) break;
+    for (const c of out.channels ?? []) list.push({ id: c.id, name: `#${c.name}${c.is_ext_shared ? " (shared with store)" : ""}` });
+    cursor = out.response_metadata?.next_cursor ?? "";
+    if (!cursor) break;
+  }
+  list.sort((a, b) => a.name.localeCompare(b.name));
+  await setState("slack_channels", { at: Date.now(), list });
+  return list;
+}
+
+const slackPeople = new Map<string, { name: string | null; email: string | null }>();
+async function slackPerson(id: string) {
+  if (slackPeople.has(id)) return slackPeople.get(id)!;
+  const out = await slack("users.info", { user: id }, true).catch(() => null);
+  const p = { name: out?.user?.profile?.real_name || out?.user?.real_name || out?.user?.name || null, email: out?.user?.profile?.email ?? null };
+  slackPeople.set(id, p);
+  return p;
+}
+
+export async function slackPull(chats: { id: string; slack_channel_id: string | null }[], save: (chatId: string, list: Pulled[]) => Promise<number>, sinceMs: number) {
+  if (!slackConfigured()) return 0;
+  const token = process.env.SLACK_BOT_TOKEN!;
+  const counts = await Promise.all(chats.filter((c) => c.slack_channel_id).map(async (c) => {
+    try {
+      const out = await slack("conversations.history", { channel: c.slack_channel_id!, oldest: (sinceMs / 1000).toFixed(6), limit: 100 }, true);
+      if (!out.ok) return 0;
+      const list: Pulled[] = [];
+      for (const m of (out.messages ?? []) as any[]) {
+        if (m.subtype && m.subtype !== "file_share" && m.subtype !== "thread_broadcast") continue;
+        const media: IncomingMedia[] = ((m.files ?? []) as any[]).filter((f) => f.url_private).map((f) => ({ url: f.url_private, auth: `Bearer ${token}`, name: f.name, type: f.mimetype }));
+        const body = String(m.text ?? "").replace(/<@([A-Z0-9]+)>/g, "@someone").replace(/<(https?:[^|>]+)\|([^>]+)>/g, "$2 ($1)").replace(/<(https?:[^>]+)>/g, "$1").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
+        if (!body && !media.length) continue;
+        // Our app's own posts are what the site sent; skip them.
+        if (m.bot_id) continue;
+        const who = m.user ? await slackPerson(m.user) : { name: m.username ?? null, email: null };
+        list.push({ body, sender: who.email ?? m.user ?? null, senderName: who.name, externalId: `sl-${m.ts}`, at: new Date(Number(m.ts) * 1000).toISOString(), media });
+      }
+      return list.length ? await save(c.id, list.reverse()) : 0;
+    } catch { return 0; }
+  }));
+  return counts.reduce((a, b) => a + b, 0);
 }

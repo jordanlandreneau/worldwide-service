@@ -7,6 +7,7 @@ import { db } from "@/lib/data";
 import { type Chat, deliver, type Extras, followUpText, type Member, whatsappNames } from "@/lib/follow-send";
 import { type Mention, storeUploads } from "@/lib/follow-media";
 import type { Result } from "@/lib/manage";
+import { answerEarlier } from "@/lib/follow-team";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CHANNELS = ["whatsapp", "teams", "email", "google_chat", "sms", "slack"];
@@ -40,14 +41,18 @@ async function send(chatId: string, body: string, subject: string, extra: Record
   const found = await loadChat(chatId);
   if (!found) return { error: "This chat no longer exists." };
   if (!found.chat.active) return { error: "This chat is turned off. A manager can turn it back on." };
-  const result = await deliver(found.chat, found.members, body, subject, by.email, extras);
+  const result = await deliver(found.chat, found.members, body, subject, by.email, { ...extras, senderName: by.name });
   const client = db();
   await client.from("follow_messages").insert({
     chat_id: chatId, direction: "outbound", body, sender_name: by.name, sender: by.email, ...extra, attachments: extras.attachments ?? [], mentions: extras.mentions ?? [],
     status: result.ok ? "sent" : "failed", error: result.ok ? null : result.error, external_id: result.ok ? result.externalId ?? null : null,
     read: true, created_by: by.email,
   });
-  if (result.ok) await client.from("follow_chats").update({ last_activity: new Date().toISOString() }).eq("id", chatId);
+  if (result.ok) {
+    await client.from("follow_chats").update({ last_activity: new Date().toISOString() }).eq("id", chatId);
+    // A message (not a new follow-up) answers what the store said in the last day.
+    if (extra.kind !== "follow_up") await answerEarlier(chatId, new Date().toISOString(), { name: by.name, email: by.email });
+  }
   refresh(chatId);
   return result.ok ? { ok: true } : { error: `${result.error} The message is saved here as not sent.` };
 }
@@ -103,6 +108,24 @@ export async function acknowledge(chatId: string, id: string) {
   refresh(chatId);
 }
 
+// Some store messages need nothing back ("Thanks!", "👍"). This clears them and records who decided that.
+export async function noReplyNeeded(chatId: string, id: string) {
+  const by = await sender();
+  if (!UUID.test(chatId) || !UUID.test(id)) return;
+  await db().from("follow_messages").update({ handled_kind: "void", handled_by: by.email, handled_name: by.name, handled_at: new Date().toISOString(), read: true })
+    .eq("id", id).eq("chat_id", chatId).eq("direction", "inbound").is("handled_kind", null);
+  refresh(chatId);
+}
+
+// Which store messages pop up for this person: only theirs, theirs plus nobody's, or everything.
+export async function setAlerts(f: FormData) {
+  const user = await requireUser("agent");
+  const v = String(f.get("alerts") ?? "");
+  if (!["mine", "unclaimed", "all"].includes(v)) return;
+  await db().from("app_users").update({ follow_alerts: v }).ilike("email", user.email.replace(/[%_\\]/g, "\\$&"));
+  revalidatePath("/follow-up");
+}
+
 export async function reopen(chatId: string, id: string) {
   await sender();
   if (!UUID.test(chatId) || !UUID.test(id)) return;
@@ -131,6 +154,7 @@ export async function saveChat(id: string | null, _: Result, f: FormData): Promi
     name, channel, dealership_id: store,
     whatsapp_group_id: text(f, "whatsapp_group_id", 120), teams_chat_id: text(f, "teams_chat_id", 200),
     google_chat_space: text(f, "google_chat_space", 120), justcall_line: text(f, "justcall_line", 40), slack_channel_id: text(f, "slack_channel_id", 120),
+    color: /^#[0-9a-f]{6}$/i.test(String(f.get("color") ?? "")) && f.get("color_auto") === null ? String(f.get("color")).toLowerCase() : null,
     active: id ? f.get("active") !== null : true,
   };
   const client = db();

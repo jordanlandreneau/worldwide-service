@@ -2,6 +2,7 @@ import "server-only";
 import { timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/data";
+import { answerEarlier, isTeam } from "@/lib/follow-team";
 
 // Webhooks prove they're ours with ?key=FOLLOW_UP_WEBHOOK_KEY. With no key set, they're refused.
 export function checkHookKey(request: NextRequest) {
@@ -24,6 +25,15 @@ export async function saveInbound(chatId: string, m: { body: string; sender: str
   }
   const when = typeof m.at === "number" || /^\d+$/.test(String(m.at ?? "")) ? new Date(Number(m.at) * (Number(m.at) < 1e12 ? 1000 : 1)) : m.at ? new Date(m.at) : new Date();
   const created_at = Number.isNaN(when.getTime()) ? new Date().toISOString() : when.toISOString();
+  // Our own agents typing in the chat app: saved as our side, and they answer what the store said before.
+  if (await isTeam(m.sender, name)) {
+    const { data: made } = await client.from("follow_messages").upsert({
+      chat_id: chatId, direction: "outbound", kind: "team", body: m.body.slice(0, 8000), sender: m.sender, sender_name: name, attachments: m.attachments ?? [],
+      status: "sent", external_id: m.externalId, read: true, created_at,
+    }, { onConflict: "chat_id,external_id", ignoreDuplicates: true }).select("id");
+    if (made?.length) await answerEarlier(chatId, created_at, { name, email: /@/.test(m.sender ?? "") ? m.sender : null });
+    return;
+  }
   await client.from("follow_messages").upsert({
     chat_id: chatId, direction: "inbound", body: m.body.slice(0, 8000), sender: m.sender, sender_name: name, attachments: m.attachments ?? [],
     status: "received", external_id: m.externalId, read: false, created_at,

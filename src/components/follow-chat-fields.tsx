@@ -1,7 +1,7 @@
 import { Field } from "@/components/action-form";
 import { CHANNEL_NAMES as CHANNELS } from "@/lib/follow-channels";
 
-export function ChatFields({ chat, stores, spaces = [] }: { chat?: any; stores: { id: string; name: string }[]; spaces?: { name: string; displayName: string }[] }) {
+export function ChatFields({ chat, stores, spaces = [], slackChannels = [] }: { chat?: any; stores: { id: string; name: string }[]; spaces?: { name: string; displayName: string }[]; slackChannels?: { id: string; name: string }[] }) {
   return (
     <>
       <Field label="Chat name"><input className="x-input" name="name" required defaultValue={chat?.name ?? ""} placeholder="Store // WWBDC Follow Up" /></Field>
@@ -22,7 +22,21 @@ export function ChatFields({ chat, stores, spaces = [] }: { chat?: any; stores: 
           </select>
         </Field>
       ) : <Field label="Google Chat space (Google Chat)"><input className="x-input" name="google_chat_space" defaultValue={chat?.google_chat_space ?? ""} placeholder="spaces/AAAA..." /></Field>}
-      <Field label="Slack channel id (Slack chats)"><input className="x-input" name="slack_channel_id" defaultValue={chat?.slack_channel_id ?? ""} placeholder="C0123456789" /></Field>
+      {slackChannels.length ? (
+        <Field label="Slack channel (Slack chats)">
+          <select className="x-input" name="slack_channel_id" defaultValue={chat?.slack_channel_id ?? ""}>
+            <option value="">Choose the channel…</option>
+            {chat?.slack_channel_id && !slackChannels.some((c) => c.id === chat.slack_channel_id) && <option value={chat.slack_channel_id}>{chat.slack_channel_id} (the app isn&apos;t in it)</option>}
+            {slackChannels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
+      ) : <Field label="Slack channel id (Slack chats)"><input className="x-input" name="slack_channel_id" defaultValue={chat?.slack_channel_id ?? ""} placeholder="C0123456789" /></Field>}
+      <Field label="Dealership color">
+        <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <input type="color" name="color" defaultValue={chat?.color ?? chat?.autoColor ?? "#2563eb"} style={{ width: 44, height: 32, padding: 0, border: 0, background: "none" }} />
+          <label className="text-sm" style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" name="color_auto" defaultChecked={!chat?.color} /> Automatic</label>
+        </span>
+      </Field>
       <Field label="JustCall number to text from (SMS chats, optional)"><input className="x-input" name="justcall_line" defaultValue={chat?.justcall_line ?? ""} placeholder="Blank = the store's Service line" /><small className="text-ink-muted" style={{ display: "block", marginTop: 4 }}>One group text from the store profile&apos;s JustCall number (Service line) with the phones in the Roster (up to 9). The first message starts the group; replies show up here.</small></Field>
       {chat && <label className="text-sm" style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" name="active" defaultChecked={chat.active} /> Chat is on</label>}
     </>

@@ -1206,3 +1206,32 @@ span.cc-wave { cursor: default; }
 .fu-found a { margin-left: 6px; text-decoration: underline; }
 .fu-bubble.fu-hit { outline: 2px solid #f5b13d; outline-offset: 2px; }
 .fu-incontext { display: inline-block; margin-top: 4px; font-size: 11px; text-decoration: underline; opacity: .85; }
+
+/* Follow-ups: one list of every dealership, color coded, bigger names */
+.fu-item { border-left: 5px solid var(--dc, var(--fu-line)); }
+.fu-item-top strong { font-size: 15.5px; font-weight: 650; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.25; color: var(--fu-title); }
+.fu-ch-ico { font-size: 15px; flex: none; }
+.fu-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; flex: none; vertical-align: middle; }
+.fu-detail-head h2 { font-size: 19px; }
+.fu-side-label small { font-weight: 400; opacity: .7; text-transform: none; letter-spacing: 0; }
+.fu-nav a .fu-count { margin-left: auto; background: #e5484d; }
+.fu-alert-pref { display: flex; flex-wrap: wrap; gap: 6px; align-items: end; margin: 8px 12px; font-size: 12px; color: var(--fu-muted); }
+.fu-alert-pref label { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.fu-alert-pref select { width: 100%; padding: 5px 6px; border: 1px solid var(--fu-line); border-radius: 6px; background: var(--fu-panel); color: var(--fu-ink); font-size: 12px; }
+.fu-alert-pref button { padding: 5px 10px; border: 1px solid var(--fu-line); border-radius: 6px; background: var(--fu-sel); color: var(--fu-title); font-size: 12px; cursor: pointer; }
+/* Needs reply keeps recently handled messages, dimmed */
+.fu-bubble.done { opacity: .62; }
+.fu-done-head { margin-top: 14px; font-weight: 600; }
+.fu-state.void { background: #ececec; color: #555; }
+.fu-app:not([data-theme="light"]) .fu-state.void { background: #2a2a2a; color: #bbb; }
+/* My notifications */
+.fu-note-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.fu-note { border: 1px solid var(--fu-line); border-left: 5px solid var(--dc); border-radius: 8px; background: var(--fu-panel); padding: 12px 14px; }
+.fu-note-top { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; justify-content: space-between; }
+.fu-note-top strong { font-size: 15.5px; color: var(--fu-title); }
+.fu-note-why { margin: 4px 0 0; font-size: 12px; font-weight: 600; color: #b45309; }
+.fu-note-body { margin: 6px 0; white-space: pre-wrap; font-size: 14px; color: var(--fu-ink); }
+.fu-notes .fu-thread-tools { padding: 8px 0; border-bottom: 0; }
+.fu-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.fu-table th, .fu-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--fu-line); }
+.fu-table th { color: var(--fu-muted); font-weight: 600; }

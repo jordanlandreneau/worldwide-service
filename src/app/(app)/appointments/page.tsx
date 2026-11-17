@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { ActionButton, Field, InlineForm } from "@/components/action-form";
+import { ActionButton, Field, InlineForm, ModalForm } from "@/components/action-form";
 import { PasteFill } from "@/components/paste-fill";
 import { StorePicker } from "@/components/store-picker";
 import { Card, Page, Table } from "@/components/ui";
 import { atLeast } from "@/lib/access";
-import { deleteAppointment, saveAppointment, setAppointmentStatus } from "@/lib/appointments";
+import { deleteAppointment, saveAppointment, setAppointmentStatus, updateAppointment } from "@/lib/appointments";
 import { db, fetchAll } from "@/lib/data";
 import { localParts, requireScoped, showLocal } from "@/lib/scope";
 import { findAppointments } from "@/lib/appointment-list";
@@ -35,6 +35,25 @@ export default async function Appointments({ searchParams }: { searchParams: Pro
   const tz = (store?.timezone as string | undefined) ?? "America/New_York";
   const today = localParts(new Date(), tz).date;
 
+  // Change a saved appointment: dealership, customer, phone, date, time, notes.
+  function EditAppt({ a }: { a: any }) {
+    const s = names.get(a.dealership_id);
+    const when = localParts(new Date(a.appt_at), (s?.timezone as string | undefined) ?? "America/New_York");
+    return (
+      <ModalForm button="Edit" title={`Edit ${a.customer_name}'s appointment`} note="Times are the dealership's local time. Changing the dealership keeps the campaign only if it belongs to the new dealership." action={updateAppointment.bind(null, a.id)}>
+        <Field label="Dealership"><select className="x-input" name="dealership_id" defaultValue={a.dealership_id}>{(stores.some((x) => x.id === a.dealership_id) ? stores : [{ id: a.dealership_id, name: "Current dealership" }, ...stores]).map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field>
+        <Field label="Customer name"><input className="x-input" name="customer_name" required defaultValue={a.customer_name} /></Field>
+        <Field label="Phone number"><input className="x-input" name="phone" type="tel" required defaultValue={a.phone} /></Field>
+        <div className="cc-form-grid">
+          <Field label="Date"><input className="x-input" type="date" name="date" required defaultValue={when.date} /></Field>
+          <Field label="Time"><input className="x-input" type="time" name="time" required step={300} defaultValue={when.time} /></Field>
+        </div>
+        <input type="hidden" name="campaign_id" value={a.campaign_id ?? ""} />
+        <Field label="Notes (optional)"><input className="x-input" name="notes" defaultValue={a.notes ?? ""} /></Field>
+      </ModalForm>
+    );
+  }
+
   return (
     <Page title="Appointments" subtitle={store ? `${store.name}` : staff ? "Every Service store" : "Your stores"} actions={stores.length > 1 ? <StorePicker base="/appointments" stores={stores} selected={store?.name} /> : undefined}>
       {added && <Card><p role="status" className="text-sm">Appointment saved. No text is sent; the store&apos;s CRM confirms it with the customer.</p></Card>}
@@ -46,12 +65,12 @@ export default async function Appointments({ searchParams }: { searchParams: Pro
               <div className="cc-form-grid">
                 <Field label="Customer name"><input className="x-input" name="customer_name" required autoComplete="off" /></Field>
                 <Field label="Phone number"><input className="x-input" name="phone" type="tel" required autoComplete="off" placeholder="(555) 555-5555" /></Field>
-                <Field label="Dealership"><input className="x-input" value={store.name} readOnly aria-readonly /></Field>
+                <Field label="Dealership"><select className="x-input" name="dealership_id" defaultValue={store.id}>{stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
               </div>
               <div className="cc-form-grid">
                 <Field label="Date"><input className="x-input" type="date" name="date" required defaultValue={today} /></Field>
                 <Field label="Time"><input className="x-input" type="time" name="time" required step={300} /></Field>
-                <Field label="Campaign (optional)">
+                <Field label={`Campaign (optional, ${store.name})`}>
                   <select className="x-input" name="campaign_id" defaultValue={((camps ?? []) as any[]).some((c) => c.id === campaign) ? campaign : ""}><option value="">None</option>{((camps ?? []) as any[]).map((c) => <option key={c.id} value={c.id}>{c.category} · {c.name}</option>)}</select>
                 </Field>
               </div>
@@ -89,7 +108,10 @@ export default async function Appointments({ searchParams }: { searchParams: Pro
                 </form>
               ) : STATUS.find(([k]) => k === a.status)?.[1] ?? a.status,
               <span key="n" className="x-prewrap">{a.notes ?? "—"}</span>,
-              ...(staff ? [personName.get(String(a.created_by).toLowerCase()) ?? a.created_by, atLeast(user.role, "manager") ? <ActionButton key="d" label="Delete" confirm={`Delete ${a.customer_name}'s appointment?`} action={deleteAppointment.bind(null, a.id)} /> : ""] : []),
+              ...(staff ? [personName.get(String(a.created_by).toLowerCase()) ?? a.created_by, <span key="d" className="x-filters" style={{ flexWrap: "nowrap" }}>
+                {(atLeast(user.role, "manager") || String(a.created_by).toLowerCase() === user.email.toLowerCase()) && <EditAppt a={a} />}
+                {atLeast(user.role, "manager") && <ActionButton label="Delete" confirm={`Delete ${a.customer_name}'s appointment?`} action={deleteAppointment.bind(null, a.id)} />}
+              </span>] : []),
             ];
           })}
         />

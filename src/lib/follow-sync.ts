@@ -4,6 +4,8 @@ import { saveInbound } from "@/lib/follow-inbound";
 import { googleMessages, googlePull, googleSpaceMembers, googleSpaces, type Pulled, teamsPull } from "@/lib/follow-providers";
 import { smsPull } from "@/lib/follow-sms";
 import { storeRemote } from "@/lib/follow-media";
+import { answerEarlier } from "@/lib/follow-team";
+import { slackPull } from "@/lib/follow-providers";
 
 // Saves only the messages this chat doesn't have yet (one lookup per chat), and returns how many were new.
 async function saveNew(chatId: string, list: Pulled[]) {
@@ -15,13 +17,23 @@ async function saveNew(chatId: string, list: Pulled[]) {
   // Pictures are copied into the site's storage as the message comes in (chat-app links expire).
   const files = new Map<string, unknown[]>();
   for (const m of fresh) if (m.media?.length) files.set(m.externalId, (await Promise.all(m.media.slice(0, 6).map((x) => storeRemote(chatId, x)))).filter(Boolean));
-  const ours = fresh.filter((m) => m.ours);
+  let ours = fresh.filter((m) => m.ours);
+  if (ours.length) {
+    // Skip echoes of what was sent from the site itself (same text within 15 minutes).
+    const earliest = Math.min(...ours.map((m) => Date.parse(m.at))) - 15 * 60_000;
+    const { data: sent } = await db().from("follow_messages").select("body,created_at").eq("chat_id", chatId).eq("direction", "outbound").not("created_by", "is", null).gte("created_at", new Date(earliest).toISOString()).limit(500);
+    const flat = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase();
+    const site = ((sent ?? []) as any[]).map((x) => ({ b: flat(String(x.body ?? "")), t: Date.parse(x.created_at) }));
+    ours = ours.filter((m) => !site.some((x) => x.b === flat(m.body) && Math.abs(x.t - Date.parse(m.at)) < 15 * 60_000));
+  }
   if (ours.length) {
     // Our team's messages (sent in the chat app itself) are kept as our side of the conversation.
     await db().from("follow_messages").upsert(ours.map((m) => ({
-      chat_id: chatId, direction: "outbound", body: m.body.slice(0, 8000), sender: m.sender, sender_name: m.senderName, status: "sent", attachments: files.get(m.externalId) ?? [],
+      chat_id: chatId, direction: "outbound", kind: "team", body: m.body.slice(0, 8000), sender: m.sender, sender_name: m.senderName, status: "sent", attachments: files.get(m.externalId) ?? [],
       external_id: m.externalId, read: true, created_at: new Date(m.at).toISOString(),
     })), { onConflict: "chat_id,external_id", ignoreDuplicates: true });
+    const last = ours.reduce((x, y) => (Date.parse(y.at) > Date.parse(x.at) ? y : x));
+    await answerEarlier(chatId, new Date(last.at).toISOString(), { name: last.senderName, email: /@/.test(last.sender ?? "") ? last.sender : null });
   }
   for (const m of fresh.filter((x) => !x.ours)) await saveInbound(chatId, { body: m.body, sender: m.sender, senderName: m.senderName, externalId: m.externalId, at: m.at, attachments: files.get(m.externalId) ?? [] });
   return fresh.length;
@@ -128,9 +140,19 @@ export async function importGoogleSpaces(by: string) {
   return fresh.length;
 }
 
+// Slack replies are pulled from each channel the Worldwide Service app was invited to.
+export async function pullSlack(force = false) {
+  if (!process.env.SLACK_BOT_TOKEN) return 0;
+  const prev = await claim("slack_sync", force ? 0 : 20_000);
+  if (prev === null) return 0;
+  const since = prev ? Math.min(Date.now() - 10 * 60_000, prev - 5 * 60_000) : Date.now() - 86400_000;
+  const { data: chats } = await db().from("follow_chats").select("id,slack_channel_id").eq("channel", "slack").eq("active", true).not("slack_channel_id", "is", null);
+  return slackPull((chats ?? []) as any[], saveNew, since);
+}
+
 export async function pullAll() {
-  const [teams, whatsapp, sms, google] = await Promise.all([pullTeams().catch(() => 0), pullWhatsApp().catch(() => 0), pullSms().catch(() => 0), pullGoogle().catch(() => 0)]);
-  return teams + whatsapp + sms + google;
+  const [teams, whatsapp, sms, google, slack] = await Promise.all([pullTeams().catch(() => 0), pullWhatsApp().catch(() => 0), pullSms().catch(() => 0), pullGoogle().catch(() => 0), pullSlack().catch(() => 0)]);
+  return teams + whatsapp + sms + google + slack;
 }
 
 // The last 30 days of messages and the space's members, for a Google Chat chat. Safe to run again.
