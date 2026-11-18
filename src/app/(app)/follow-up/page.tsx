@@ -326,7 +326,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
   }
 
   async function Thread({ chat, people }: { chat: any; people: any[] }) {
-    const cols = "id,direction,body,sender_name,sender,kind,status,error,read,created_at,reply_to,handled_kind,handled_name,handled_at,attachments";
+    const cols = "id,direction,body,sender_name,sender,kind,status,error,read,created_at,reply_to,handled_kind,handled_name,handled_at,attachments,customer_name";
     const onlyOpen = sp.show === "open";
     // Three ways to show the chat: the newest messages, every message matching a search
     // in this chat (all history), or the conversation around one message picked from search.
@@ -363,6 +363,11 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
     const doneRecently = all.filter((m) => m.direction === "inbound" && m.handled_kind && m.handled_at && Date.now() - Date.parse(m.handled_at) < 3 * DAY).reverse();
     const stream = onlyOpen ? [...open, ...doneRecently] : all.filter((m) => !(m.direction === "outbound" && m.reply_to && byId.has(m.reply_to)));
     const firstDone = onlyOpen ? doneRecently[0]?.id : undefined;
+    const followUps = all.filter((m) => m.kind === "follow_up" && m.status !== "failed");
+    const lastFollowUp = (m: any) => {
+      const t = Date.parse(m.created_at);
+      return [...followUps].reverse().find((f) => { const ft = Date.parse(f.created_at); return ft < t && ft > t - 3 * DAY; }) ?? null;
+    };
     const pending = all.filter((m) => m.direction === "inbound" && !m.read).length;
     const advisors = people.filter((p) => !/wwbdc|worldwide|service bdc|management/i.test(`${p.name} ${p.email ?? ""}`)).map((p) => p.name as string);
     // @ suggestions: the Roster plus everyone actually in the Teams chat or Google Chat space.
@@ -400,7 +405,9 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
               const d = day(m.created_at);
               const sep = !onlyOpen && d !== lastDay ? (lastDay = d) : null;
               const kind = m.direction === "inbound" ? "inbound" : m.kind === "follow_up" ? "outbound dispatch" : m.reply_to ? "outbound reply" : "outbound";
-              const label = m.direction === "inbound" ? who(m) : m.kind === "follow_up" ? "Follow-up dispatch" : m.reply_to ? "Our reply" : m.kind === "team" ? `${m.sender_name ?? "Our team"} (in the chat app)` : "Our message";
+              const label = m.direction === "inbound" ? who(m) : m.kind === "follow_up" ? "Follow-up dispatch" : m.reply_to ? "Our reply" : m.kind === "team" ? "In the chat app" : "Our message";
+              // The follow-up a store message is answering: the latest one sent in the 3 days before it.
+              const answering = m.direction === "inbound" ? lastFollowUp(m) : null;
               const replies = answers.get(m.id) ?? [];
               return (
                 <li key={m.id} id={`m-${m.id}`} className="fu-row">
@@ -408,12 +415,13 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
                   {onlyOpen && m.id === firstDone && <div className="fu-day fu-done-head">{open.length ? "Handled in the last 3 days" : "Nothing waiting · handled in the last 3 days"}</div>}
                   {onlyOpen && <div className="fu-day">{day(m.created_at)}</div>}
                   <div className={`fu-bubble ${kind}${onlyOpen && m.handled_kind ? " done" : ""}${sp.at === m.id && mode === "at" ? " fu-hit" : ""}${m.direction === "inbound" && !m.handled_kind ? " open" : ""}${m.direction === "inbound" && !m.read ? " unread" : ""}${m.status === "failed" ? " failed" : ""}`}>
-                    <span className="fu-who">{label}</span>
+                    <span className="fu-who">{label}{m.direction === "outbound" && <> · <span className="fu-sentby">sent by <b>{m.sender_name ?? "WWBDC"}</b></span></>}</span>
+                    {answering && <span className="fu-sentby fu-re">↩ Re: follow-up{answering.customer_name ? ` for ${answering.customer_name}` : ""} sent by <b>{answering.sender_name ?? "WWBDC"}</b></span>}
                     {m.direction === "inbound" && m.sender && m.sender_name && <span className="fu-mono fu-from">{m.sender}</span>}
                     {m.direction === "outbound" && m.reply_to && byId.get(m.reply_to) && <span className="fu-quote">↪ {who(byId.get(m.reply_to))}: {byId.get(m.reply_to).body.slice(0, 80)}</span>}
                     {m.body && <p><Mark text={m.body} terms={hl} /></p>}
                     <Pictures list={m.attachments} />
-                    <span className="fu-time">{time(m.created_at)}{m.direction === "outbound" && m.sender_name ? ` · ${m.sender_name}` : ""}</span>
+                    <span className="fu-time">{time(m.created_at)}</span>
                     {mode === "find" && <Link className="fu-incontext" href={`${link({ ...here, at: m.id })}#m-${m.id}`}>Show in chat →</Link>}
                     {m.status === "failed" && <span className="fu-notsent">Not sent{m.error ? `: ${m.error}` : ""}</span>}
                   </div>
@@ -432,10 +440,10 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
                     <ul className="fu-answers">
                       {replies.map((r) => (
                         <li key={r.id} id={`m-${r.id}`} className={`fu-bubble outbound reply${sp.at === r.id && mode === "at" ? " fu-hit" : ""}${r.status === "failed" ? " failed" : ""}`}>
-                          <span className="fu-who">Our reply</span>
+                          <span className="fu-who">Our reply · <span className="fu-sentby">sent by <b>{r.sender_name ?? "WWBDC"}</b></span></span>
                           {r.body && <p><Mark text={r.body} terms={hl} /></p>}
                           <Pictures list={r.attachments} />
-                          <span className="fu-time">{time(r.created_at)}{r.sender_name ? ` · ${r.sender_name}` : ""}</span>
+                          <span className="fu-time">{time(r.created_at)}</span>
                           {r.status === "failed" && <span className="fu-notsent">Not sent{r.error ? `: ${r.error}` : ""}</span>}
                         </li>
                       ))}
@@ -559,7 +567,7 @@ export default async function FollowUps({ searchParams }: { searchParams: Promis
                   <strong>{c ? <>{ICON[c.channel as Channel]} {c.name}</> : "Chat"}</strong>
                   <span className="fu-muted">{m.sender_name || m.sender || "Store"} · {day(m.created_at)} {time(m.created_at)}</span>
                 </div>
-                <p className="fu-note-why">{why}</p>
+                <p className="fu-note-why">{why}{cl?.followUpBy && <> · sent by <b>{cl.followUpBy}</b></>}</p>
                 {m.body && <p className="fu-note-body">{m.body.slice(0, 600)}</p>}
                 <Pictures list={m.attachments} />
                 <div className="fu-handled">

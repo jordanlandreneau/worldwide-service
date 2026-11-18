@@ -12,7 +12,7 @@ export const alertsFor = (role: string, saved?: string | null): Alerts =>
   saved === "mine" || saved === "unclaimed" || saved === "all" ? saved : role === "agent" ? "mine" : "unclaimed";
 
 export type StoreMsg = { id: string; chat_id: string; body: string; created_at: string };
-export type Claim = { owners: Set<string>; mentioned: Set<string>; followUp: string | null };
+export type Claim = { owners: Set<string>; mentioned: Set<string>; followUp: string | null; followUpBy: string | null };
 
 export async function claims(rows: StoreMsg[]): Promise<Map<string, Claim>> {
   const out = new Map<string, Claim>();
@@ -20,7 +20,7 @@ export async function claims(rows: StoreMsg[]): Promise<Map<string, Claim>> {
   const chats = [...new Set(rows.map((r) => r.chat_id))];
   const oldest = Math.min(...rows.map((r) => Date.parse(r.created_at))) - WINDOW;
   const [{ data: sent }, people] = await Promise.all([
-    db().from("follow_messages").select("chat_id,created_by,created_at,kind,customer_name").eq("direction", "outbound").not("created_by", "is", null)
+    db().from("follow_messages").select("chat_id,created_by,created_at,kind,customer_name,sender_name").eq("direction", "outbound").not("created_by", "is", null)
       .in("chat_id", chats).gte("created_at", new Date(oldest).toISOString()).order("created_at", { ascending: false }).limit(5000),
     teamPeople(),
   ]);
@@ -32,7 +32,7 @@ export async function claims(rows: StoreMsg[]): Promise<Map<string, Claim>> {
     const owners = new Set<string>(before.map((s) => String(s.created_by).toLowerCase()));
     const text = ` ${String(r.body ?? "").toLowerCase()} `;
     const mentioned = new Set<string>(people.filter((p) => (p.first.length >= 3 && text.includes(`@${p.first}`)) || (p.full.includes(" ") && text.includes(`@${p.full}`))).map((p) => p.email));
-    out.set(r.id, { owners, mentioned, followUp: before.find((s) => s.kind === "follow_up")?.customer_name ?? null });
+    out.set(r.id, { owners, mentioned, followUp: before.find((s) => s.kind === "follow_up")?.customer_name ?? null, followUpBy: before.find((s) => s.kind === "follow_up")?.sender_name ?? before[0]?.sender_name ?? null });
   }
   return out;
 }

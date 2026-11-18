@@ -1235,3 +1235,8 @@ span.cc-wave { cursor: default; }
 .fu-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .fu-table th, .fu-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--fu-line); }
 .fu-table th { color: var(--fu-muted); font-weight: 600; }
+/* Who sent each message */
+.fu-sentby { font-weight: 500; }
+.fu-sentby b { font-weight: 700; }
+.fu-re { display: block; margin: 2px 0 4px; font-size: 11.5px; color: #b45309; }
+.fu-app:not([data-theme="light"]) .fu-re { color: #f5b13d; }
