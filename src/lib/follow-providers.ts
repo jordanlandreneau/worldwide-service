@@ -111,9 +111,33 @@ export async function teamsSend(chatId: string | null, text: string, extras: { p
     method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ body: { contentType: "html", content: html || "&nbsp;" }, ...(mentions.length ? { mentions } : {}), ...(hostedContents.length ? { hostedContents } : {}) }),
   });
-  if (!res.ok) return { ok: false, error: `Teams refused the message (${res.status}).` };
+  if (!res.ok) return { ok: false, error: await teamsWhy(res, token) };
   const body = (await res.json().catch(() => ({}))) as any;
   return { ok: true, externalId: body.id };
+}
+
+// Turns a Teams refusal into something a person can act on, with Microsoft's own reason.
+async function teamsWhy(res: Response, token: string) {
+  const err = ((await res.json().catch(() => ({}))) as any)?.error ?? {};
+  const said = String(err.message ?? err.code ?? "").slice(0, 200);
+  if (res.status === 403 || res.status === 404) {
+    const me = (await getState<MsTokens>("teams"))?.account ?? "the connected Teams account";
+    return `Teams refused the message (${res.status}): ${me} isn't in this Teams chat anymore, or the chat was replaced. In Teams, add ${me} back to the chat (or paste the new chat's id in this chat's Settings).${said ? ` Microsoft said: ${said}` : ""}`;
+  }
+  if (res.status === 401) return "Teams sign-in expired. A manager needs to click Reconnect Teams in Follow-ups.";
+  return `Teams refused the message (${res.status}).${said ? ` Microsoft said: ${said}` : ""}`;
+}
+
+// Every active Teams chat: can the connected account still read it?
+export async function teamsChatCheck(chats: { name: string; teams_chat_id: string }[]) {
+  const token = await teamsAccess().catch(() => null);
+  if (!token) return [];
+  return Promise.all(chats.map(async (c) => {
+    const res = await fetch(`https://graph.microsoft.com/v1.0/chats/${encodeURIComponent(c.teams_chat_id)}/messages?$top=1`, { headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) return { name: c.name, ok: true, detail: "Can read and send" };
+    const err = ((await res.json().catch(() => ({}))) as any)?.error ?? {};
+    return { name: c.name, ok: false, detail: `${res.status === 403 || res.status === 404 ? "Our Teams account isn't in this chat" : `Error ${res.status}`}${err.message ? ` — Microsoft: ${String(err.message).slice(0, 160)}` : ""}` };
+  }));
 }
 
 // Reads recent Teams messages for each Teams chat (all chats at once) and hands the store's messages to save.
