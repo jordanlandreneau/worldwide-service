@@ -312,7 +312,9 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
     }
     body = (
       <>
-        <form className="cc-filters">
+        {/* The editor sits beside the filter form, not inside it: a form inside a form makes Save submit the filters instead. */}
+        <div className="cc-filters">
+        <form style={{ display: "contents" }}>
           <input type="hidden" name="d" value={store.id} />
           <input type="hidden" name="tab" value="analytics" />
           <label>Campaign <select className="x-input" name="campaign" defaultValue={chosen?.id ?? ""}><option value="">All campaigns</option>{categories.map((k) => <optgroup key={k} label={k}>{campaigns.filter((c) => c.category === k).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>)}</select></label>
@@ -320,11 +322,12 @@ export default async function CommandCenter({ searchParams }: { searchParams: Pr
           <label>To <input className="x-input" type="date" name="to" defaultValue={to} /></label>
           <button className="x-btn">Apply</button>
           {(from || to || chosen) && <Link className="x-btn" href={href({})} style={{ display: "inline-flex", alignItems: "center" }}>Clear</Link>}
+        </form>
           {staff && <span style={{ marginLeft: "auto", display: "inline-flex", gap: 8, alignItems: "center" }}>
             <Link className="x-btn" href={`/command?d=${store.id}&tab=breakdown`} style={{ display: "inline-flex", alignItems: "center" }}>Daily entries</Link>
             <TotalsEditor primary button="Edit the numbers" storeId={store.id} campaign={chosen} from={from} to={to} calls={calls} connected={connected} appts={appts} />
           </span>}
-        </form>
+        </div>
         <div className="cc-stats">
           <StatCard label="Outbound calls" icon={<PhoneCall size={18} aria-hidden />} value={calls} note={`${chosen ? chosen.name : "All campaigns"} · ${from || to ? "chosen dates" : "all time"}`} tone="slate" bar={100} />
           <StatCard label="Connection rate" icon={<Signal size={18} aria-hidden />} value={pct(connected, calls)} unit="%" note={calls ? `${connected.toLocaleString()} of ${calls.toLocaleString()} calls reached the customer` : staff ? "Use Edit the numbers to add calls" : "No calls entered yet"} tone="amber" bar={pct(connected, calls)} />
