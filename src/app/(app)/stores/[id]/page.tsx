@@ -3,12 +3,12 @@ import { notFound } from "next/navigation";
 import { ActionButton, Field, InlineForm, ModalForm } from "@/components/action-form";
 import { DATA_TABS, ServiceDataEditor } from "@/components/service-data-editor";
 import { StoreFields } from "@/components/store-form";
-import { Card, Page, Table } from "@/components/ui";
+import { Card, Page, Status, Table } from "@/components/ui";
 import { isServiceTeam, requireUser } from "@/lib/access";
 import { addAssignment, removeAssignment } from "@/lib/assign-actions";
 import { assignmentsFor, serviceAgents } from "@/lib/assignments";
 import { db } from "@/lib/data";
-import { deleteServiceLogin, saveServiceHours, saveServiceLogin, saveStore } from "@/lib/stores";
+import { deleteServiceLogin, saveServiceHours, saveServiceLogin, saveStore, setStoreActive } from "@/lib/stores";
 
 export const metadata = { title: "Store · Worldwide Service" };
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -48,7 +48,12 @@ export default async function StorePage({ params, searchParams }: { params: Prom
     </>
   );
   return (
-    <Page title={store.name} subtitle="Everything for this store: details, JustCall numbers, Service login, hours and Service Data" actions={<span className="x-filters"><Link className="x-btn" href={`/service/info?d=${id}`} style={{ display: "inline-flex", alignItems: "center" }}>Open Service Data</Link></span>}>
+    <Page title={store.name} subtitle="Everything for this store: details, JustCall numbers, Service login, hours and Service Data" actions={<span className="x-filters">
+      <Status value={store.active !== false} />
+      {store.active !== false
+        ? <ActionButton label="Make inactive" confirm={`Make ${store.name} inactive? It will be hidden from agents and the store pickers until you turn it back on.`} action={setStoreActive.bind(null, id, false)} />
+        : <ActionButton label="Make active" action={setStoreActive.bind(null, id, true)} />}
+      <Link className="x-btn" href={`/service/info?d=${id}`} style={{ display: "inline-flex", alignItems: "center" }}>Open Service Data</Link></span>}>
       <nav className="cc-tabs" role="tablist" aria-label="Store sections">
         {([["store", "Store, logins & hours"], ...DATA_TABS] as const).map(([k, label]) => (
           <Link key={k} role="tab" aria-selected={tab === k} data-active={tab === k} href={`/stores/${id}${k === "store" ? "" : `?tab=${k}`}`}>{label}</Link>

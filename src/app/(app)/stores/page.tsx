@@ -2,12 +2,14 @@ import Link from "next/link";
 import { Card, Page, Status, Table } from "@/components/ui";
 import { requireUser } from "@/lib/access";
 import { db, fetchAll } from "@/lib/data";
+import { ActionButton } from "@/components/action-form";
+import { setStoreActive } from "@/lib/stores";
 
 export const metadata = { title: "Stores · Worldwide Service" };
 
-export default async function Stores({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+export default async function Stores({ searchParams }: { searchParams: Promise<{ q?: string; show?: string }> }) {
   await requireUser("admin");
-  const { q = "" } = await searchParams;
+  const { q = "", show = "all" } = await searchParams;
   const client = db();
   const { data: dept } = await client.from("departments").select("id").ilike("name", "service").maybeSingle();
   const [stores, lines, logins, profiles] = await Promise.all([
@@ -23,7 +25,8 @@ export default async function Stores({ searchParams }: { searchParams: Promise<{
   const drafts = stores.filter((s: any) => s.active === false && s.status === "Onboarding").sort((a: any, b: any) => String(b.created_at).localeCompare(String(a.created_at)));
   const { data: subs } = await client.from("onboarding_submissions").select("dealership_id,submitter_email,created_at").order("created_at", { ascending: false }).limit(200);
   const sub = new Map(((subs ?? []) as any[]).map((x) => [x.dealership_id, x]));
-  const shown = stores.filter((s: any) => !term || s.name.toLowerCase().includes(term));
+  const shown = stores.filter((s: any) => (!term || s.name.toLowerCase().includes(term)) && (show === "active" ? s.active !== false : show === "inactive" ? s.active === false : true));
+  const nActive = stores.filter((s: any) => s.active !== false).length;
   return (
     <Page title="Stores" subtitle={`${shown.length} shown · ${stores.length} Service stores`} actions={<><Link href="/stores/sections" className="x-btn" style={{ display: "inline-flex", alignItems: "center" }}>Service Data sections</Link><Link href="/stores/new" className="x-btn x-btn-primary" style={{ display: "inline-flex", alignItems: "center" }}>+ New store</Link></>}>
       {drafts.length > 0 && (
@@ -42,18 +45,26 @@ export default async function Stores({ searchParams }: { searchParams: Promise<{
       <Card>
         <form className="x-filters">
           <input className="x-input" name="q" defaultValue={q} placeholder="Store name" aria-label="Search stores" />
+          <select className="x-input" name="show" defaultValue={show} aria-label="Show">
+            <option value="all">All stores ({stores.length})</option>
+            <option value="active">Active ({nActive})</option>
+            <option value="inactive">Inactive ({stores.length - nActive})</option>
+          </select>
           <button className="x-btn x-btn-primary">Search</button>
         </form>
       </Card>
       <Card>
         <Table
-          head={["Store", "Status", "JustCall (store)", "JustCall (Service)", "Service login", "Service Data"]}
+          head={["Store", "Status", "JustCall (store)", "JustCall (Service)", "Service login", "Service Data", ""]}
           rows={shown.map((s: any) => [
             <Link key="n" href={`/stores/${s.id}`} className="text-accent">{s.name}</Link>,
             <Status key="s" value={s.active !== false} />,
             s.just_call_number ?? "—", serviceLine.get(s.id) ?? "—",
             hasLogin.has(s.id) ? "Yes" : "—",
             hasData.has(s.id) ? <Link key="d" className="text-accent" href={`/service/info?d=${s.id}`}>Open</Link> : "—",
+            s.active !== false
+              ? <ActionButton key="t" label="Make inactive" confirm={`Make ${s.name} inactive? It will be hidden from agents and the store pickers until you turn it back on.`} action={setStoreActive.bind(null, s.id, false)} />
+              : <ActionButton key="t" label="Make active" action={setStoreActive.bind(null, s.id, true)} />,
           ])}
         />
       </Card>

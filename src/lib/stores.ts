@@ -32,6 +32,26 @@ function refresh(id?: string) {
 }
 
 // Adds or edits a Service store. The JustCall numbers are what the Codes page uses to match codes to the store.
+// One click: switch a store on or off. Inactive stores are hidden from agents and the pickers.
+export async function setStoreActive(id: string, active: boolean): Promise<void> {
+  const user = await requireUser("admin");
+  if (!UUID.test(id)) return;
+  const client = db();
+  const { data: s } = await client.from("dealerships").select("status").eq("id", id).maybeSingle();
+  if (!s) return;
+  const { error } = await client.from("dealerships").update({
+    active, updated_at: new Date().toISOString(),
+    // A reviewed onboarding draft stops being a draft once it goes live.
+    ...(active && s.status === "Onboarding" ? { status: null } : {}),
+  }).eq("id", id);
+  if (error) return;
+  await client.from("edit_log").insert({ user_email: user.email, table_name: "dealerships", row_id: id, action: active ? "make store active" : "make store inactive" });
+  refresh(id);
+  revalidatePath("/command");
+  revalidatePath("/follow-up");
+  revalidatePath("/appointments");
+}
+
 export async function saveStore(id: string | null, _: Result, f: FormData): Promise<Result> {
   const user = await requireUser("admin");
   if (id && !UUID.test(id)) return { error: "This store no longer exists." };
